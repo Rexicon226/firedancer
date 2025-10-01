@@ -428,7 +428,7 @@ fd_sandbox_private_set_rlimits( ulong rlimit_file_cnt,
   for( ulong i=0UL; i<sizeof(rlimits)/sizeof(rlimits[ 0 ]); i++ ) {
     if( dumpable && rlimits[i].resource==RLIMIT_CORE ) continue;
     struct rlimit limit = { .rlim_cur=rlimits[ i ].limit, .rlim_max=rlimits[ i ].limit };
-    if( -1==setrlimit( rlimits[ i ].resource, &limit ) ) FD_LOG_ERR(( "setrlimit(%u) failed (%i-%s)", rlimits[ i ].resource, errno, fd_io_strerror( errno ) ));
+    if( -1==setrlimit( rlimits[ i ].resource, &limit ) ) FD_LOG_ERR(( "setrlimit(%u) failed (%i-%s)", (uint)rlimits[ i ].resource, errno, fd_io_strerror( errno ) ));
   }
 }
 
