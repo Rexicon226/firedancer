@@ -162,7 +162,7 @@ fd_sandbox_private_check_exact_file_descriptors( ulong       allowed_file_descri
        If we don't align it the compiler might prove somthing weird and
        trash this code, and also ASAN would flag it as an error.  So we
        just align it anyway. */
-    uchar buf[ 4096 ] __attribute__((aligned(alignof(struct dirent64))));
+    uchar buf[ 4096 ] __attribute__((aligned(alignof(struct dirent))));
 
     long dents_bytes = syscall( SYS_getdents64, dirfd, buf, sizeof( buf ) );
     if( !dents_bytes ) break;
@@ -170,7 +170,7 @@ fd_sandbox_private_check_exact_file_descriptors( ulong       allowed_file_descri
 
     ulong offset = 0UL;
     while( offset<(ulong)dents_bytes ) {
-      struct dirent64 const * dent = (struct dirent64 const *)(buf + offset);
+      struct dirent const * dent = (struct dirent const *)(buf + offset);
       if( !strcmp( dent->d_name, "." ) || !strcmp( dent->d_name, ".." ) ) {
         offset += dent->d_reclen;
         continue;
