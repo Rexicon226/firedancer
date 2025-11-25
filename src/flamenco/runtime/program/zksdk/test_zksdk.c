@@ -6,10 +6,10 @@
 #include "../../../../ballet/hex/fd_hex.h"
 #include "../../fd_bank.h"
 
-#include "instructions/test_fd_zksdk_pubkey_validity.h"
+#include "instructions/test_fd_zksdk.h"
 
 // turn on/off benches
-#define BENCH 0
+#define BENCH 1
 
 uchar *
 load_test_tx(char * hex[], ulong hex_sz, ulong * tx_len) {
@@ -115,6 +115,106 @@ test_pubkey_validity( FD_FN_UNUSED fd_rng_t * rng ) {
   free(tx);
 }
 
+FD_FN_UNUSED static void
+test_zero_ciphertext( FD_FN_UNUSED fd_rng_t * rng ) {
+  char ** hex = tx_zero_ciphertext;
+  ulong hex_sz = sizeof(tx_zero_ciphertext);
+  ulong context_sz = fd_zksdk_context_sz[FD_ZKSDK_INSTR_VERIFY_ZERO_CIPHERTEXT];
+
+  ulong tx_len = 0;
+  uchar * tx = load_test_tx( hex, hex_sz, &tx_len );
+  void const * context = tx;
+  void const * proof = tx + context_sz;
+
+  /* Benchmarks */
+#if BENCH
+  ulong iter = 10000UL;
+  long dt = fd_log_wallclock();
+  for( ulong rem=iter; rem; rem-- ) {
+    FD_COMPILER_FORGET( proof ); FD_COMPILER_FORGET( context );
+    fd_zksdk_instr_verify_proof_zero_ciphertext( context, proof );
+  }
+  dt = fd_log_wallclock() - dt;
+  log_bench( "fd_zksdk_instr_verify_proof_zero_ciphertext", iter, dt );
+#endif
+  free(tx);
+}
+
+FD_FN_UNUSED static void
+test_percentage_with_cap( FD_FN_UNUSED fd_rng_t * rng ) {
+  char ** hex = tx_percentage_with_cap;
+  ulong hex_sz = sizeof(tx_percentage_with_cap);
+  ulong context_sz = fd_zksdk_context_sz[FD_ZKSDK_INSTR_VERIFY_PERCENTAGE_WITH_CAP];
+
+  ulong tx_len = 0;
+  uchar * tx = load_test_tx( hex, hex_sz, &tx_len );
+  void const * context = tx;
+  void const * proof = tx + context_sz;
+
+  /* Benchmarks */
+#if BENCH
+  ulong iter = 1000UL;
+  long dt = fd_log_wallclock();
+  for( ulong rem=iter; rem; rem-- ) {
+    FD_COMPILER_FORGET( proof ); FD_COMPILER_FORGET( context );
+    fd_zksdk_instr_verify_proof_percentage_with_cap( context, proof );
+  }
+  dt = fd_log_wallclock() - dt;
+  log_bench( "fd_zksdk_instr_verify_proof_percentage_with_cap", iter, dt );
+#endif
+  free(tx);
+}
+
+FD_FN_UNUSED static void
+test_range_proof_64( FD_FN_UNUSED fd_rng_t * rng ) {
+  char ** hex = tx_range_proof_64;
+  ulong hex_sz = sizeof(tx_range_proof_64);
+  ulong context_sz = fd_zksdk_context_sz[FD_ZKSDK_INSTR_VERIFY_BATCHED_RANGE_PROOF_U64];
+
+  ulong tx_len = 0;
+  uchar * tx = load_test_tx( hex, hex_sz, &tx_len );
+  void const * context = tx;
+  void const * proof = tx + context_sz;
+
+  /* Benchmarks */
+#if BENCH
+  ulong iter = 1000UL;
+  long dt = fd_log_wallclock();
+  for( ulong rem=iter; rem; rem-- ) {
+    FD_COMPILER_FORGET( proof ); FD_COMPILER_FORGET( context );
+    fd_zksdk_instr_verify_proof_batched_range_proof_u64( context, proof );
+  }
+  dt = fd_log_wallclock() - dt;
+  log_bench( "fd_zksdk_instr_verify_proof_batched_range_proof_u64", iter, dt );
+#endif
+  free(tx);
+}
+
+FD_FN_UNUSED static void
+test_range_proof_256( FD_FN_UNUSED fd_rng_t * rng ) {
+  char ** hex = tx_range_proof_256;
+  ulong hex_sz = sizeof(tx_range_proof_256);
+  ulong context_sz = fd_zksdk_context_sz[FD_ZKSDK_INSTR_VERIFY_BATCHED_RANGE_PROOF_U256];
+
+  ulong tx_len = 0;
+  uchar * tx = load_test_tx( hex, hex_sz, &tx_len );
+  void const * context = tx;
+  void const * proof = tx + context_sz;
+
+  /* Benchmarks */
+#if BENCH
+  ulong iter = 1000UL;
+  long dt = fd_log_wallclock();
+  for( ulong rem=iter; rem; rem-- ) {
+    FD_COMPILER_FORGET( proof ); FD_COMPILER_FORGET( context );
+    fd_zksdk_instr_verify_proof_batched_range_proof_u256( context, proof );
+  }
+  dt = fd_log_wallclock() - dt;
+  log_bench( "fd_zksdk_instr_verify_proof_batched_range_proof_u256", iter, dt );
+#endif
+  free(tx);
+}
+
 int
 main( int     argc,
       char ** argv ) {
@@ -123,6 +223,10 @@ main( int     argc,
   fd_rng_t _rng[1]; fd_rng_t * rng = fd_rng_join( fd_rng_new( _rng, 0U, 0UL ) );
 
   test_pubkey_validity( rng );
+  test_zero_ciphertext( rng );
+  test_percentage_with_cap( rng );
+  test_range_proof_64( rng );
+  test_range_proof_256( rng );
 
   fd_rng_delete( fd_rng_leave( rng ) );
 
