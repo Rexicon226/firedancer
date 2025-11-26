@@ -650,11 +650,11 @@ install () {
   fi
   ( install_openssl   )
   ( install_secp256k1 )
+  ( install_flatcc )
   if [[ $DEVMODE == 1 ]]; then
     ( install_bzip2     )
     ( install_snappy    )
     ( install_rocksdb   )
-    ( install_flatcc    )
   fi
 
   # Merge lib64 with lib
