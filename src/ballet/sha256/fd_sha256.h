@@ -167,6 +167,11 @@ fd_sha256_hash_32_repeated( void const * data,
                             void *       hash,
                             ulong        cnt );
 
+void *
+fd_sha256_hash_32_repeated_old( void const * data,
+                            void *       hash,
+                            ulong        cnt );
+
 FD_PROTOTYPES_END
 
 #if 0 /* SHA256 batch API details */

@@ -233,6 +233,22 @@ fd_sha256_core_ref( uint *        state,
     } while( 0 )
 
 
+  /* _mm_sha256rnds2_epu32 does two rounds, one from the first uint in
+  wk and one from the second.  Since wk stores four rounds worth of
+  message schedule values, it makes sense for the macro to do four
+  rounds at a time.  We need to permute wk in between so that the
+  second call to the intrinsic will use the other values. */
+#define FOUR_ROUNDS_NEW( wk ) do {                                                               \
+      vu_t __wk = (wk);                                                                      \
+      vu_t temp_state = stateFEBA;                                                           \
+      stateFEBA = _mm_sha256rnds2_epu32( stateHGDC, stateFEBA, __wk );                       \
+      stateHGDC = temp_state;                                                                \
+                                                                                             \
+      temp_state = stateFEBA;                                                                \
+      stateFEBA = _mm_sha256rnds2_epu32( stateHGDC, stateFEBA, vu_permute( __wk, 2,3,0,1 ) );\
+      stateHGDC = temp_state;                                                                \
+    } while( 0 )
+
 /* For completeness, here's the documentation for _mm_sha256msg1_epu32
    and _mm_sha256msg2_epu32 in a slightly reformatted way, where all
    values are uints, and "-" indicates a don't-care value:
@@ -506,6 +522,119 @@ fd_sha256_hash( void const * _data,
   return memcpy( _hash, state, 32 );
 }
 
+void *
+fd_sha256_hash_32_repeated_old( void const * _data,
+                            void *       _hash,
+                            ulong        cnt ) {
+  uchar const * data = (uchar const *)_data;
+  uchar       * hash = (uchar       *)_hash;
+#if FD_HAS_SHANI
+
+  vu_t       w0003 = vu_bswap( vu_ldu( data      ) );
+  vu_t       w0407 = vu_bswap( vu_ldu( data+16UL ) );
+  vb_t const w080b = vb( 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 );
+  vb_t const w0c0f = vb( 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00 ); /* 32 bytes */
+
+  vu_t const initialFEBA = vu( FD_SHA256_INITIAL_F, FD_SHA256_INITIAL_E, FD_SHA256_INITIAL_B, FD_SHA256_INITIAL_A );
+  vu_t const initialHGDC = vu( FD_SHA256_INITIAL_H, FD_SHA256_INITIAL_G, FD_SHA256_INITIAL_D, FD_SHA256_INITIAL_C );
+
+  for( ulong iter=0UL; iter<cnt; iter++ ) {
+    vu_t stateFEBA = initialFEBA;
+    vu_t stateHGDC = initialHGDC;
+
+    // vu_t w1013 = NEXT_W( w0003, w0407, w080b, w0c0f ); FOUR_ROUNDS( vu_add( w0003, vu_ld( fd_sha256_K+ 0UL ) ) );
+    // vu_t w1417 = NEXT_W( w0407, w080b, w0c0f, w1013 ); FOUR_ROUNDS( vu_add( w0407, vu_ld( fd_sha256_K+ 4UL ) ) );
+    // vu_t w181b = NEXT_W( w080b, w0c0f, w1013, w1417 ); FOUR_ROUNDS( vu_add( w080b, vu_ld( fd_sha256_K+ 8UL ) ) );
+    // vu_t w1c1f = NEXT_W( w0c0f, w1013, w1417, w181b ); FOUR_ROUNDS( vu_add( w0c0f, vu_ld( fd_sha256_K+12UL ) ) );
+    // vu_t w2023 = NEXT_W( w1013, w1417, w181b, w1c1f ); FOUR_ROUNDS( vu_add( w1013, vu_ld( fd_sha256_K+16UL ) ) );
+    // vu_t w2427 = NEXT_W( w1417, w181b, w1c1f, w2023 ); FOUR_ROUNDS( vu_add( w1417, vu_ld( fd_sha256_K+20UL ) ) );
+    // vu_t w282b = NEXT_W( w181b, w1c1f, w2023, w2427 ); FOUR_ROUNDS( vu_add( w181b, vu_ld( fd_sha256_K+24UL ) ) );
+    // vu_t w2c2f = NEXT_W( w1c1f, w2023, w2427, w282b ); FOUR_ROUNDS( vu_add( w1c1f, vu_ld( fd_sha256_K+28UL ) ) );
+    // vu_t w3033 = NEXT_W( w2023, w2427, w282b, w2c2f ); FOUR_ROUNDS( vu_add( w2023, vu_ld( fd_sha256_K+32UL ) ) );
+    // vu_t w3437 = NEXT_W( w2427, w282b, w2c2f, w3033 ); FOUR_ROUNDS( vu_add( w2427, vu_ld( fd_sha256_K+36UL ) ) );
+    // vu_t w383b = NEXT_W( w282b, w2c2f, w3033, w3437 ); FOUR_ROUNDS( vu_add( w282b, vu_ld( fd_sha256_K+40UL ) ) );
+    // vu_t w3c3f = NEXT_W( w2c2f, w3033, w3437, w383b ); FOUR_ROUNDS( vu_add( w2c2f, vu_ld( fd_sha256_K+44UL ) ) );
+    // /*                                              */ FOUR_ROUNDS( vu_add( w3033, vu_ld( fd_sha256_K+48UL ) ) );
+    // /*                                              */ FOUR_ROUNDS( vu_add( w3437, vu_ld( fd_sha256_K+52UL ) ) );
+    // /*                                              */ FOUR_ROUNDS( vu_add( w383b, vu_ld( fd_sha256_K+56UL ) ) );
+    // /*                                              */ FOUR_ROUNDS( vu_add( w3c3f, vu_ld( fd_sha256_K+60UL ) ) );
+
+    /*                                              */ FOUR_ROUNDS( vu_add( w0003, vu_ld( fd_sha256_K+ 0UL ) ) );
+    /*                                              */ FOUR_ROUNDS( vu_add( w0407, vu_ld( fd_sha256_K+ 4UL ) ) );
+    /*                                              */ FOUR_ROUNDS( vu_add( w080b, vu_ld( fd_sha256_K+ 8UL ) ) );
+    /*                                              */ FOUR_ROUNDS( vu_add( w0c0f, vu_ld( fd_sha256_K+12UL ) ) );
+    vu_t w1013 = NEXT_W( w0003, w0407, w080b, w0c0f ); FOUR_ROUNDS( vu_add( w1013, vu_ld( fd_sha256_K+16UL ) ) );
+    vu_t w1417 = NEXT_W( w0407, w080b, w0c0f, w1013 ); FOUR_ROUNDS( vu_add( w1417, vu_ld( fd_sha256_K+20UL ) ) );
+    vu_t w181b = NEXT_W( w080b, w0c0f, w1013, w1417 ); FOUR_ROUNDS( vu_add( w181b, vu_ld( fd_sha256_K+24UL ) ) );
+    vu_t w1c1f = NEXT_W( w0c0f, w1013, w1417, w181b ); FOUR_ROUNDS( vu_add( w1c1f, vu_ld( fd_sha256_K+28UL ) ) );
+    vu_t w2023 = NEXT_W( w1013, w1417, w181b, w1c1f ); FOUR_ROUNDS( vu_add( w2023, vu_ld( fd_sha256_K+32UL ) ) );
+    vu_t w2427 = NEXT_W( w1417, w181b, w1c1f, w2023 ); FOUR_ROUNDS( vu_add( w2427, vu_ld( fd_sha256_K+36UL ) ) );
+    vu_t w282b = NEXT_W( w181b, w1c1f, w2023, w2427 ); FOUR_ROUNDS( vu_add( w282b, vu_ld( fd_sha256_K+40UL ) ) );
+    vu_t w2c2f = NEXT_W( w1c1f, w2023, w2427, w282b ); FOUR_ROUNDS( vu_add( w2c2f, vu_ld( fd_sha256_K+44UL ) ) );
+    vu_t w3033 = NEXT_W( w2023, w2427, w282b, w2c2f ); FOUR_ROUNDS( vu_add( w3033, vu_ld( fd_sha256_K+48UL ) ) );
+    vu_t w3437 = NEXT_W( w2427, w282b, w2c2f, w3033 ); FOUR_ROUNDS( vu_add( w3437, vu_ld( fd_sha256_K+52UL ) ) );
+    vu_t w383b = NEXT_W( w282b, w2c2f, w3033, w3437 ); FOUR_ROUNDS( vu_add( w383b, vu_ld( fd_sha256_K+56UL ) ) );
+    vu_t w3c3f = NEXT_W( w2c2f, w3033, w3437, w383b ); FOUR_ROUNDS( vu_add( w3c3f, vu_ld( fd_sha256_K+60UL ) ) );
+
+    stateFEBA = vu_add( stateFEBA, initialFEBA );
+    stateHGDC = vu_add( stateHGDC, initialHGDC );
+
+    vu_t stateABCD = vu_permute2( stateFEBA, stateHGDC, 3, 2, 3, 2 );
+    vu_t stateEFGH = vu_permute2( stateFEBA, stateHGDC, 1, 0, 1, 0 );
+
+    w0003 = stateABCD;
+    w0407 = stateEFGH;
+  }
+  vu_stu( hash,      vu_bswap( w0003 ) );
+  vu_stu( hash+16UL, vu_bswap( w0407 ) );
+
+#else
+
+  uchar buf[ FD_SHA256_PRIVATE_BUF_MAX ] __attribute__((aligned(128)));
+
+  /* Prepare padding once */
+  ulong buf_used = 32UL;
+  memcpy( buf, data, 32UL );
+  buf[ buf_used ] = (uchar)0x80;
+  buf_used++;
+
+  ulong bit_cnt = 32UL << 3;
+  memset( buf + buf_used, 0, FD_SHA256_PRIVATE_BUF_MAX-8UL-buf_used );
+  FD_STORE( ulong, buf+FD_SHA256_PRIVATE_BUF_MAX-8UL, fd_ulong_bswap( bit_cnt ) );
+
+  /* This is just the above streamlined to eliminate all the overheads
+     to support incremental hashing. */
+  for( ulong iter=0UL; iter<cnt; iter++ ) {
+
+    uint  state[8] __attribute__((aligned(32)));
+
+    state[0] = FD_SHA256_INITIAL_A;
+    state[1] = FD_SHA256_INITIAL_B;
+    state[2] = FD_SHA256_INITIAL_C;
+    state[3] = FD_SHA256_INITIAL_D;
+    state[4] = FD_SHA256_INITIAL_E;
+    state[5] = FD_SHA256_INITIAL_F;
+    state[6] = FD_SHA256_INITIAL_G;
+    state[7] = FD_SHA256_INITIAL_H;
+
+    fd_sha256_core( state, buf, 1UL );
+
+    state[0] = fd_uint_bswap( state[0] );
+    state[1] = fd_uint_bswap( state[1] );
+    state[2] = fd_uint_bswap( state[2] );
+    state[3] = fd_uint_bswap( state[3] );
+    state[4] = fd_uint_bswap( state[4] );
+    state[5] = fd_uint_bswap( state[5] );
+    state[6] = fd_uint_bswap( state[6] );
+    state[7] = fd_uint_bswap( state[7] );
+    memcpy( buf, state, 32UL );
+  }
+  memcpy( hash, buf, 32UL );
+#endif
+  return _hash;
+}
 
 
 void *
@@ -515,6 +644,7 @@ fd_sha256_hash_32_repeated( void const * _data,
   uchar const * data = (uchar const *)_data;
   uchar       * hash = (uchar       *)_hash;
 #if FD_HAS_SHANI
+
   vu_t       w0003 = vu_bswap( vu_ldu( data      ) );
   vu_t       w0407 = vu_bswap( vu_ldu( data+16UL ) );
   vb_t const w080b = vb( 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
@@ -531,22 +661,22 @@ fd_sha256_hash_32_repeated( void const * _data,
 
 
 
-    vu_t w1013 = NEXT_W( w0003, w0407, w080b, w0c0f ); FOUR_ROUNDS( vu_add( w0003, vu_ld( fd_sha256_K+ 0UL ) ) );
-    vu_t w1417 = NEXT_W( w0407, w080b, w0c0f, w1013 ); FOUR_ROUNDS( vu_add( w0407, vu_ld( fd_sha256_K+ 4UL ) ) );
-    vu_t w181b = NEXT_W( w080b, w0c0f, w1013, w1417 ); FOUR_ROUNDS( vu_add( w080b, vu_ld( fd_sha256_K+ 8UL ) ) );
-    vu_t w1c1f = NEXT_W( w0c0f, w1013, w1417, w181b ); FOUR_ROUNDS( vu_add( w0c0f, vu_ld( fd_sha256_K+12UL ) ) );
-    vu_t w2023 = NEXT_W( w1013, w1417, w181b, w1c1f ); FOUR_ROUNDS( vu_add( w1013, vu_ld( fd_sha256_K+16UL ) ) );
-    vu_t w2427 = NEXT_W( w1417, w181b, w1c1f, w2023 ); FOUR_ROUNDS( vu_add( w1417, vu_ld( fd_sha256_K+20UL ) ) );
-    vu_t w282b = NEXT_W( w181b, w1c1f, w2023, w2427 ); FOUR_ROUNDS( vu_add( w181b, vu_ld( fd_sha256_K+24UL ) ) );
-    vu_t w2c2f = NEXT_W( w1c1f, w2023, w2427, w282b ); FOUR_ROUNDS( vu_add( w1c1f, vu_ld( fd_sha256_K+28UL ) ) );
-    vu_t w3033 = NEXT_W( w2023, w2427, w282b, w2c2f ); FOUR_ROUNDS( vu_add( w2023, vu_ld( fd_sha256_K+32UL ) ) );
-    vu_t w3437 = NEXT_W( w2427, w282b, w2c2f, w3033 ); FOUR_ROUNDS( vu_add( w2427, vu_ld( fd_sha256_K+36UL ) ) );
-    vu_t w383b = NEXT_W( w282b, w2c2f, w3033, w3437 ); FOUR_ROUNDS( vu_add( w282b, vu_ld( fd_sha256_K+40UL ) ) );
-    vu_t w3c3f = NEXT_W( w2c2f, w3033, w3437, w383b ); FOUR_ROUNDS( vu_add( w2c2f, vu_ld( fd_sha256_K+44UL ) ) );
-    /*                                              */ FOUR_ROUNDS( vu_add( w3033, vu_ld( fd_sha256_K+48UL ) ) );
-    /*                                              */ FOUR_ROUNDS( vu_add( w3437, vu_ld( fd_sha256_K+52UL ) ) );
-    /*                                              */ FOUR_ROUNDS( vu_add( w383b, vu_ld( fd_sha256_K+56UL ) ) );
-    /*                                              */ FOUR_ROUNDS( vu_add( w3c3f, vu_ld( fd_sha256_K+60UL ) ) );
+    vu_t w1013 = NEXT_W( w0003, w0407, w080b, w0c0f ); FOUR_ROUNDS_NEW( vu_add( w0003, vu_ld( fd_sha256_K+ 0UL ) ) );
+    vu_t w1417 = NEXT_W( w0407, w080b, w0c0f, w1013 ); FOUR_ROUNDS_NEW( vu_add( w0407, vu_ld( fd_sha256_K+ 4UL ) ) );
+    vu_t w181b = NEXT_W( w080b, w0c0f, w1013, w1417 ); FOUR_ROUNDS_NEW( vu_add( w080b, vu_ld( fd_sha256_K+ 8UL ) ) );
+    vu_t w1c1f = NEXT_W( w0c0f, w1013, w1417, w181b ); FOUR_ROUNDS_NEW( vu_add( w0c0f, vu_ld( fd_sha256_K+12UL ) ) );
+    vu_t w2023 = NEXT_W( w1013, w1417, w181b, w1c1f ); FOUR_ROUNDS_NEW( vu_add( w1013, vu_ld( fd_sha256_K+16UL ) ) );
+    vu_t w2427 = NEXT_W( w1417, w181b, w1c1f, w2023 ); FOUR_ROUNDS_NEW( vu_add( w1417, vu_ld( fd_sha256_K+20UL ) ) );
+    vu_t w282b = NEXT_W( w181b, w1c1f, w2023, w2427 ); FOUR_ROUNDS_NEW( vu_add( w181b, vu_ld( fd_sha256_K+24UL ) ) );
+    vu_t w2c2f = NEXT_W( w1c1f, w2023, w2427, w282b ); FOUR_ROUNDS_NEW( vu_add( w1c1f, vu_ld( fd_sha256_K+28UL ) ) );
+    vu_t w3033 = NEXT_W( w2023, w2427, w282b, w2c2f ); FOUR_ROUNDS_NEW( vu_add( w2023, vu_ld( fd_sha256_K+32UL ) ) );
+    vu_t w3437 = NEXT_W( w2427, w282b, w2c2f, w3033 ); FOUR_ROUNDS_NEW( vu_add( w2427, vu_ld( fd_sha256_K+36UL ) ) );
+    vu_t w383b = NEXT_W( w282b, w2c2f, w3033, w3437 ); FOUR_ROUNDS_NEW( vu_add( w282b, vu_ld( fd_sha256_K+40UL ) ) );
+    vu_t w3c3f = NEXT_W( w2c2f, w3033, w3437, w383b ); FOUR_ROUNDS_NEW( vu_add( w2c2f, vu_ld( fd_sha256_K+44UL ) ) );
+    /*                                              */ FOUR_ROUNDS_NEW( vu_add( w3033, vu_ld( fd_sha256_K+48UL ) ) );
+    /*                                              */ FOUR_ROUNDS_NEW( vu_add( w3437, vu_ld( fd_sha256_K+52UL ) ) );
+    /*                                              */ FOUR_ROUNDS_NEW( vu_add( w383b, vu_ld( fd_sha256_K+56UL ) ) );
+    /*                                              */ FOUR_ROUNDS_NEW( vu_add( w3c3f, vu_ld( fd_sha256_K+60UL ) ) );
 
     stateFEBA = vu_add( stateFEBA, initialFEBA );
     stateHGDC = vu_add( stateHGDC, initialHGDC );
@@ -560,6 +690,7 @@ fd_sha256_hash_32_repeated( void const * _data,
   vu_stu( hash,      vu_bswap( w0003 ) );
   vu_stu( hash+16UL, vu_bswap( w0407 ) );
 #undef NEXT_W
+#undef FOUR_ROUNDS
 
 #else
 

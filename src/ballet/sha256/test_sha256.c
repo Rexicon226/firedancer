@@ -174,6 +174,36 @@ main( int     argc,
     float hashes_per_sec = ((float)iter * 1e-6f ) / ((float)dt * 1e-9f) ;
     FD_LOG_NOTICE(( "~%6.3f M poh hashes / sec / core with fd_sha256_hash_32_repeated", (double)hashes_per_sec ));
   }
+  {
+    fd_sha256_hash_32_repeated_old( in_hash, hash, 10UL );
+    ulong iter = 1000000UL;
+    /* Now do it again with hash_32_repeated */
+    long  dt   = -fd_log_wallclock();
+    fd_sha256_hash_32_repeated_old( in_hash, hash, iter );
+    dt += fd_log_wallclock();
+    float hashes_per_sec = ((float)iter * 1e-6f ) / ((float)dt * 1e-9f) ;
+    FD_LOG_NOTICE(( "~%6.3f M poh hashes / sec / core with fd_sha256_hash_32_repeated_old", (double)hashes_per_sec ));
+  }
+  {
+    fd_sha256_hash_32_repeated( in_hash, hash, 10UL );
+    ulong iter = 1000000UL;
+    /* Now do it again with hash_32_repeated */
+    long  dt   = -fd_log_wallclock();
+    fd_sha256_hash_32_repeated( in_hash, hash, iter );
+    dt += fd_log_wallclock();
+    float hashes_per_sec = ((float)iter * 1e-6f ) / ((float)dt * 1e-9f) ;
+    FD_LOG_NOTICE(( "~%6.3f M poh hashes / sec / core with fd_sha256_hash_32_repeated", (double)hashes_per_sec ));
+  }
+  {
+    fd_sha256_hash_32_repeated_old( in_hash, hash, 10UL );
+    ulong iter = 1000000UL;
+    /* Now do it again with hash_32_repeated */
+    long  dt   = -fd_log_wallclock();
+    fd_sha256_hash_32_repeated_old( in_hash, hash, iter );
+    dt += fd_log_wallclock();
+    float hashes_per_sec = ((float)iter * 1e-6f ) / ((float)dt * 1e-9f) ;
+    FD_LOG_NOTICE(( "~%6.3f M poh hashes / sec / core with fd_sha256_hash_32_repeated_old", (double)hashes_per_sec ));
+  }
 
   /* do a quick benchmark of sha-256 on small and large UDP payload
      packets from UDP/IP4/VLAN/Ethernet */
