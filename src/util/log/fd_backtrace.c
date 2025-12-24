@@ -16,7 +16,13 @@ fd_backtrace_log( void ** addrs,
     Dl_info info;
 
     void * _map = NULL;
-    if( FD_LIKELY( dladdr1( addr, &info, &_map, RTLD_DL_LINKMAP ) && info.dli_fname && info.dli_fname[0]!='\0' ) ) {
+    if( 
+#ifdef __GLIBC__
+      FD_LIKELY( dladdr1( addr, &info, &_map, RTLD_DL_LINKMAP ) )
+#else
+      FD_LIKELY( dladdr( addr, &info ) )
+#endif
+      && info.dli_fname && info.dli_fname[0]!='\0' ) {
       struct link_map * map = _map;
       info.dli_fbase = (void*)map->l_addr;
       if( FD_UNLIKELY( !info.dli_sname ) ) info.dli_saddr = info.dli_fbase;
