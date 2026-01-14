@@ -37,7 +37,7 @@ field_constant( FILE * file, char const * name, fd_f25519_t * value ) {
 
 #if FD_HAS_AVX512
   for( int i=0; i<6; i++ ) {
-    fprintf( file, "0x%016lx, ", value->el[i]);
+    fprintf( file, "0x%016lx, ", (long unsigned int)value->el[i]);
   }
   fprintf( file, "0x0, 0x0, ");
 #else
@@ -129,18 +129,28 @@ void
 point_const( FILE * file, fd_ed25519_point_t const * value ) {
 #if FD_HAS_AVX512
       fprintf( file, "    { ");
-      for( int i=0; i<8; i++ ) {
-        fprintf( file, "0x%016lx, ", value->P03[i]);
+      for( int i=0; i<4; i++ ) {
+        fprintf( file, "0x%08llx, ", (unsigned long long)value->P0[i]);
       }
       fprintf( file, "},\n");
       fprintf( file, "    { ");
-      for( int i=0; i<8; i++ ) {
-        fprintf( file, "0x%016lx, ", value->P14[i]);
+      for( int i=0; i<4; i++ ) {
+        fprintf( file, "0x%08llx, ", (unsigned long long)value->P1[i]);
       }
       fprintf( file, "},\n");
       fprintf( file, "    { ");
-      for( int i=0; i<8; i++ ) {
-        fprintf( file, "0x%016lx, ", value->P25[i]);
+      for( int i=0; i<4; i++ ) {
+        fprintf( file, "0x%08llx, ", (unsigned long long)value->P2[i]);
+      }
+      fprintf( file, "},\n");
+      fprintf( file, "    { ");
+      for( int i=0; i<4; i++ ) {
+        fprintf( file, "0x%08llx, ", (unsigned long long)value->P3[i]);
+      }
+      fprintf( file, "},\n");
+      fprintf( file, "    { ");
+      for( int i=0; i<4; i++ ) {
+        fprintf( file, "0x%08llx, ", (unsigned long long)value->P4[i]);
       }
       fprintf( file, "},\n");
 #else

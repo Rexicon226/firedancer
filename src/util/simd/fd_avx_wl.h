@@ -100,6 +100,14 @@ static inline void wl_stu( void * p, wl_t i ) { _mm256_storeu_si256( (__m256i *)
 
 #define wl_insert(a,imm,v) _mm256_insert_epi64( (a), (v), (imm) )
 
+#define wl_unpack( x, x0,x1,x2,x3 ) do { \
+  wl_t _x = (x);                         \
+  (x0) = wl_extract( _x, 0 );            \
+  (x1) = wl_extract( _x, 1 );            \
+  (x2) = wl_extract( _x, 2 );            \
+  (x3) = wl_extract( _x, 3 );            \
+} while (0)
+
 static inline long
 wl_extract_variable( wl_t a, int n ) {
   union { __m256i m[1]; long l[4]; } t[1];
@@ -204,7 +212,14 @@ static inline wl_t wl_ror_vector( wl_t a, wl_t b ) {
 #define wl_czero(c,f)    _mm256_andnot_si256( (c), (f) ) /* [ c0?0L:f0 c1?0L:f1 ... c3?0L:f3 ] */
 #define wl_notczero(c,f) _mm256_and_si256(    (c), (f) ) /* [ c0?f0:0L c1?f1:0L ... c3?f3:0L ] */
 
-#define wl_if(c,t,f) _mm256_blendv_epi8(  (f), (t), (c) ) /* [ c0?t0:f0 c1?t1:f1 ... c3?t3:f3 ] */
+#define wl_if(c,t,f) _mm256_blendv_epi8( (f), (t), (c) ) /* [ c0?t0:f0 c1?t1:f1 ... c3?t3:f3 ] */
+
+#if defined(__AVX512F__)
+#define wl_sub_if(c, x,y,z) _mm256_mask_sub_epi64( (z), (__mmask8)(c), (x), (y) ) /* [ c0?(x0-y0):z0 ... ]*/
+#else
+#define wl_sub_if #error "TODO: define if this is constant time for non-avx512 ?"
+// static inline wl_t wl_sub_if (c, x,y,z) { return wl_if( c, wl_sub( x, y ), z ); }
+#endif 
 
 #if defined(__AVX512F__) && defined(__AVX512VL__) /* See note above */
 #define wl_abs(a)   _mm256_abs_epi64( (a) )
@@ -360,3 +375,9 @@ static inline wl_t wl_gather( long const * b, wi_t i, int imm_hi ) {
     /**/                                (c2)             = _mm256_unpacklo_epi64(     _wl_transpose_r2, _wl_transpose_r3 );       \
     /**/                                (c3)             = _mm256_unpackhi_epi64(     _wl_transpose_r2, _wl_transpose_r3 );       \
   } while(0)
+
+/* wl_madd52lo(a,b,c) returns LO64( a + LO52( LO52(b)*LO52(c) )
+   wl_madd52hi(a,b,c) returns LO64( a + HI52( LO52(b)*LO52(c) ) */
+
+#define wl_madd52lo(a,b,c) _mm256_madd52lo_epu64( (a), (b), (c) )
+#define wl_madd52hi(a,b,c) _mm256_madd52hi_epu64( (a), (b), (c) )

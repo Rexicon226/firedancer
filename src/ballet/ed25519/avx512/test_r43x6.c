@@ -849,24 +849,24 @@ main( int     argc,
     BENCH( FD_R43X6_QUAD_MUL_FAST( X, X, Y ) );
     BENCH( FD_R43X6_QUAD_SQR_FAST( X, X ) );
 
-    FD_R43X6_QUAD_UNPACK( x0,x1,x2,x3, X );
+    // FD_R43X6_QUAD_UNPACK( x0,x1,x2,x3, X );
 
-    BENCH( FD_R43X6_MUL1_INL( x0,x0,y0 ) );
-    BENCH( FD_R43X6_MUL2_INL( x0,x0,y0, x1,x1,y1 ) );
-    BENCH( FD_R43X6_MUL3_INL( x0,x0,y0, x1,x1,y1, x2,x2,y2 ) );
-    BENCH( FD_R43X6_MUL4_INL( x0,x0,y0, x1,x1,y1, x2,x2,y2, x3,x3,y3 ) );
+    // BENCH( FD_R43X6_MUL1_INL( x0,x0,y0 ) );
+    // BENCH( FD_R43X6_MUL2_INL( x0,x0,y0, x1,x1,y1 ) );
+    // BENCH( FD_R43X6_MUL3_INL( x0,x0,y0, x1,x1,y1, x2,x2,y2 ) );
+    // BENCH( FD_R43X6_MUL4_INL( x0,x0,y0, x1,x1,y1, x2,x2,y2, x3,x3,y3 ) );
 
-    BENCH( FD_R43X6_SQR1_INL( x0,x0 ) );
-    BENCH( FD_R43X6_SQR2_INL( x0,x0, x1,x1 ) );
-    BENCH( FD_R43X6_SQR3_INL( x0,x0, x1,x1, x2,x2 ) );
-    BENCH( FD_R43X6_SQR4_INL( x0,x0, x1,x1, x2,x2, x3,x3 ) );
+    // BENCH( FD_R43X6_SQR1_INL( x0,x0 ) );
+    // BENCH( FD_R43X6_SQR2_INL( x0,x0, x1,x1 ) );
+    // BENCH( FD_R43X6_SQR3_INL( x0,x0, x1,x1, x2,x2 ) );
+    // BENCH( FD_R43X6_SQR4_INL( x0,x0, x1,x1, x2,x2, x3,x3 ) );
 
-    iter_max = 131072;
+    // iter_max = 131072;
 
-    BENCH( x = fd_r43x6_invert( x ) );
-    BENCH( x = fd_r43x6_pow22523( x ) );
-    BENCH( FD_R43X6_POW22523_1_INL( x0,x0 ) );
-    BENCH( FD_R43X6_POW22523_2_INL( x0,x0, x1,x1 ) );
+    // BENCH( x = fd_r43x6_invert( x ) );
+    // BENCH( x = fd_r43x6_pow22523( x ) );
+    // BENCH( FD_R43X6_POW22523_1_INL( x0,x0 ) );
+    // BENCH( FD_R43X6_POW22523_2_INL( x0,x0, x1,x1 ) );
 
     /* Prevent compiler from optimizing away */
     dummy[0] = x0; dummy[0] = x1; dummy[0] = x2; dummy[0] = x3;

@@ -1,6 +1,9 @@
 #ifndef HEADER_fd_src_ballet_ed25519_avx512_fd_r43x6_h
 #define HEADER_fd_src_ballet_ed25519_avx512_fd_r43x6_h
 
+#ifndef HEADER_fd_src_ballet_ed25519_avx512_fd_r52x5_h
+#define HEADER_fd_src_ballet_ed25519_avx512_fd_r52x5_h
+
 #if FD_HAS_AVX512
 
 #include "../../../util/simd/fd_avx.h"
@@ -1138,6 +1141,10 @@ FD_PROTOTYPES_END
 
 #include "fd_r43x6_inl.h"
 
+#include "fd_r52x5_inl.h"
+
 #endif /* FD_HAS_AVX512 */
+
+#endif /* HEADER_fd_src_ballet_ed25519_avx512_fd_r52x5_h */
 
 #endif /* HEADER_fd_src_ballet_ed25519_avx512_fd_r43x6_h */
