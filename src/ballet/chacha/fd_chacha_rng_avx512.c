@@ -13,114 +13,98 @@ wwu_rol8( wwu_t x ) {
   return _mm512_shuffle_epi8( x, mask );
 }
 
+static inline void
+fd_chacha_rng_quarter( wwu_t *zmm ) {
+  zmm[0] = wwu_add( zmm[0], zmm[1] );
+  zmm[3] = wwu_rol16( wwu_xor( zmm[3], zmm[0] ) );
+  zmm[2] = wwu_add( zmm[2], zmm[3] );
+  zmm[1] = wwu_rol12( wwu_xor( zmm[1], zmm[2] ) );
+
+  zmm[0] = wwu_add( zmm[0], zmm[1] );
+  zmm[3] = wwu_rol8( wwu_xor( zmm[3], zmm[0] ) );
+  zmm[2] = wwu_add( zmm[2], zmm[3] );
+  zmm[1] = wwu_rol7( wwu_xor( zmm[1], zmm[2] ) );
+}
+
+static inline void
+fd_chacha_rng_kernel( wwu_t *zmm ) {
+  fd_chacha_rng_quarter( zmm );
+  // diagonalize
+  zmm[1] = wwu_permute( wwu( 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12 ), zmm[1] ); // (1, 2, 3, 0) 4x
+  zmm[2] = wwu_permute( wwu( 2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13 ), zmm[2] ); // (2, 3, 0, 1) 4x
+  zmm[3] = wwu_permute( wwu( 3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14 ), zmm[3] ); // (3, 0, 1, 2) 4x
+
+  fd_chacha_rng_quarter( zmm );
+  // undiagonalize
+  zmm[3] = wwu_permute( wwu( 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12 ), zmm[3] ); // (1, 2, 3, 0) 4x
+  zmm[2] = wwu_permute( wwu( 2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13 ), zmm[2] ); // (2, 3, 0, 1) 4x
+  zmm[1] = wwu_permute( wwu( 3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14 ), zmm[1] ); // (3, 0, 1, 2) 4x
+}
+
+static inline void
+fd_chacha_rng_transpose( wwu_t *zmm ) {
+  // v{chacha_instance}{row_in_instance}
+  wwu_t v00_10_01_11 = _mm512_inserti64x4(   zmm[0], ((__m256i*)(zmm + 1))[0], 1   );
+  wwu_t v20_30_21_31 = _mm512_shuffle_i64x2( zmm[0], zmm[1], 238                    );
+  wwu_t v02_12_03_13 = _mm512_inserti64x4(   zmm[2], ((__m256i*)(zmm + 3))[0], 1   );
+  wwu_t v22_32_23_33 = _mm512_shuffle_i64x2( zmm[2], zmm[3], 238                    );
+
+  zmm[0] = _mm512_shuffle_i64x2( v00_10_01_11, v02_12_03_13, 136 );
+  zmm[1] = _mm512_shuffle_i64x2( v00_10_01_11, v02_12_03_13, 221 );
+  zmm[2] = _mm512_shuffle_i64x2( v20_30_21_31, v22_32_23_33, 136 );
+  zmm[3] = _mm512_shuffle_i64x2( v20_30_21_31, v22_32_23_33, 221 );
+}
+
 static void
 fd_chacha_rng_refill_avx512( fd_chacha_rng_t * rng,
                              ulong             rnd2_cnt ) {
+  // /* This function should only be called if the buffer is empty. */
+  // if( FD_UNLIKELY( rng->buf_off != rng->buf_fill ) ) {
+  //   FD_LOG_CRIT(( "refill out of sync: buf_off=%lu buf_fill=%lu", rng->buf_off, rng->buf_fill ));
+  // }
 
-  /* This function should only be called if the buffer is empty. */
-  if( FD_UNLIKELY( rng->buf_off != rng->buf_fill ) ) {
-    FD_LOG_CRIT(( "refill out of sync: buf_off=%lu buf_fill=%lu", rng->buf_off, rng->buf_fill ));
+  // @bitCast(@as([4][16]u8, @splat("expand 32-byte k".*))),
+  wwu_t iv = wwu( 1634760805, 857760878, 2036477234, 1797285236, 
+                  1634760805, 857760878, 2036477234, 1797285236, 
+                  1634760805, 857760878, 2036477234, 1797285236, 
+                  1634760805, 857760878, 2036477234, 1797285236 );
+  // @bitCast(@as([4][16]u8, @splat(self.key[0..16].*))),
+  __m128i key_lo_v = _mm_load_si128( (__m128i const *)rng->key   );
+  wwu_t key_lo = _mm512_broadcast_i32x4( key_lo_v );
+  // @bitCast(@as([4][16]u8, @splat(self.key[16..32].*))),
+  __m128i key_hi_v = _mm_load_si128( (__m128i const *)rng->key+1 );
+  wwu_t key_hi = _mm512_broadcast_i32x4( key_hi_v );
+  // @bitCast(@as([4]u128, @splat(self.counter))),
+  wwu_t counter = _mm512_mask_set1_epi64( _mm512_setzero_si512(), 0x55, (long long)(rng->counter) );
+
+  wwu_t offset = wwu( 0,0,0,0, 0,0,0,1, 0,0,0,2, 0,0,0,3 );
+  wwu_t lanes[LANES][4];
+  for (uint i = 0; i<LANES; i++) {
+    lanes[i][0] = iv;
+    lanes[i][1] = key_lo;
+    lanes[i][2] = key_hi;
+    lanes[i][3] = wwu_add( counter, offset );
+    offset = wwu_add( offset, wwu_bcast( 4 ) );
   }
 
-  wwu_t iv0  = wwu_bcast( 0x61707865U );
-  wwu_t iv1  = wwu_bcast( 0x3320646eU );
-  wwu_t iv2  = wwu_bcast( 0x79622d32U );
-  wwu_t iv3  = wwu_bcast( 0x6b206574U );
-  wwu_t zero = wwu_zero();
-
-  /* Unpack key equivalent to:
-
-       c4 = wwu_bcast( (uint const *)(rng->key)[0] );
-       c5 = wwu_bcast( (uint const *)(rng->key)[1] );
-       ...
-       cB = wwu_bcast( (uint const *)(rng->key)[7] ); */
-
-  __m128i key_lo_v = _mm_load_si128( (__m128i const *)rng->key   ); /* [0,1,2,3] */
-  __m128i key_hi_v = _mm_load_si128( (__m128i const *)rng->key+1 ); /* [4,5,6,7] */
-  wwu_t key_lo = _mm512_broadcast_i32x4( key_lo_v );  /* [0,1,2,3,0,1,2,3] */
-  wwu_t key_hi = _mm512_broadcast_i32x4( key_hi_v );  /* [4,5,6,7,4,5,6,7] */
-  wwu_t k0 = _mm512_shuffle_epi32( key_lo, 0x00 );
-  wwu_t k1 = _mm512_shuffle_epi32( key_lo, 0x55 );
-  wwu_t k2 = _mm512_shuffle_epi32( key_lo, 0xaa );
-  wwu_t k3 = _mm512_shuffle_epi32( key_lo, 0xff );
-  wwu_t k4 = _mm512_shuffle_epi32( key_hi, 0x00 );
-  wwu_t k5 = _mm512_shuffle_epi32( key_hi, 0x55 );
-  wwu_t k6 = _mm512_shuffle_epi32( key_hi, 0xaa );
-  wwu_t k7 = _mm512_shuffle_epi32( key_hi, 0xff );
-
-  /* Derive block index */
-
-  ulong idx = rng->buf_fill / FD_CHACHA_BLOCK_SZ;  /* really a right shift */
-  wwu_t idxs = wwu_add( wwu_bcast( idx ), wwu( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ) );
-
-  /* Run through the round function */
-
-  wwu_t c0 = iv0;   wwu_t c1 = iv1;   wwu_t c2 = iv2;   wwu_t c3 = iv3;
-  wwu_t c4 = k0;    wwu_t c5 = k1;    wwu_t c6 = k2;    wwu_t c7 = k3;
-  wwu_t c8 = k4;    wwu_t c9 = k5;    wwu_t cA = k6;    wwu_t cB = k7;
-  wwu_t cC = idxs;  wwu_t cD = zero;  wwu_t cE = zero;  wwu_t cF = zero;
-
-# define QUARTER_ROUND(a,b,c,d)                                   \
-  do {                                                            \
-    a = wwu_add( a, b ); d = wwu_xor( d, a ); d = wwu_rol16( d ); \
-    c = wwu_add( c, d ); b = wwu_xor( b, c ); b = wwu_rol12( b ); \
-    a = wwu_add( a, b ); d = wwu_xor( d, a ); d = wwu_rol8( d );  \
-    c = wwu_add( c, d ); b = wwu_xor( b, c ); b = wwu_rol7( b );  \
-  } while(0)
-
-  for( ulong i=0UL; i<rnd2_cnt; i++ ) {
-    QUARTER_ROUND( c0, c4, c8, cC );
-    QUARTER_ROUND( c1, c5, c9, cD );
-    QUARTER_ROUND( c2, c6, cA, cE );
-    QUARTER_ROUND( c3, c7, cB, cF );
-    QUARTER_ROUND( c0, c5, cA, cF );
-    QUARTER_ROUND( c1, c6, cB, cC );
-    QUARTER_ROUND( c2, c7, c8, cD );
-    QUARTER_ROUND( c3, c4, c9, cE );
+  wwu_t pre[LANES][4];
+  memcpy( pre, lanes, sizeof(wwu_t) * LANES * 4);
+  for (uint i = 0; i<rnd2_cnt; i++) {
+    for (uint j = 0; j<LANES; j++) {
+      fd_chacha_rng_kernel( lanes[j] );
+    }
   }
-# undef QUARTER_ROUND
 
-  /* Finalize */
+  for (uint i = 0; i<LANES; i++) {
+    for (uint j = 0; j<4; j++) {
+      lanes[i][j] = wwu_add( lanes[i][j], pre[i][j] ); // add pre-round states into permuted-states.
+    }
+    fd_chacha_rng_transpose( lanes[i] );               // shuffle lane from vec-per-row to vec-per-instance
+    memcpy( &rng->buf[i * 64 * 4], lanes[i], 4 * sizeof(__m512i) );  // write out instance to buffer
+  }
 
-  c0 = wwu_add( c0, iv0  );
-  c1 = wwu_add( c1, iv1  );
-  c2 = wwu_add( c2, iv2  );
-  c3 = wwu_add( c3, iv3  );
-  c4 = wwu_add( c4, k0   );
-  c5 = wwu_add( c5, k1   );
-  c6 = wwu_add( c6, k2   );
-  c7 = wwu_add( c7, k3   );
-  c8 = wwu_add( c8, k4   );
-  c9 = wwu_add( c9, k5   );
-  cA = wwu_add( cA, k6   );
-  cB = wwu_add( cB, k7   );
-  cC = wwu_add( cC, idxs );
-  //cD = wwu_add( cD, zero );
-  //cE = wwu_add( cE, zero );
-  //cF = wwu_add( cF, zero );
-
-  /* Transpose matrix to get output vector */
-
-  wwu_transpose_16x16( c0, c1, c2, c3, c4, c5, c6, c7,
-                       c8, c9, cA, cB, cC, cD, cE, cF,
-                       c0, c1, c2, c3, c4, c5, c6, c7,
-                       c8, c9, cA, cB, cC, cD, cE, cF );
-
-  /* Update ring buffer */
-
-  uint * out = (uint *)rng->buf;
-  wwu_st( out+0x00, c0 ); wwu_st( out+0x10, c1 );
-  wwu_st( out+0x20, c2 ); wwu_st( out+0x30, c3 );
-  wwu_st( out+0x40, c4 ); wwu_st( out+0x50, c5 );
-  wwu_st( out+0x60, c6 ); wwu_st( out+0x70, c7 );
-  wwu_st( out+0x80, c8 ); wwu_st( out+0x90, c9 );
-  wwu_st( out+0xa0, cA ); wwu_st( out+0xb0, cB );
-  wwu_st( out+0xc0, cC ); wwu_st( out+0xd0, cD );
-  wwu_st( out+0xe0, cE ); wwu_st( out+0xf0, cF );
-
-  /* Update ring descriptor */
-
-  rng->buf_fill += 16*FD_CHACHA_BLOCK_SZ;
+  rng->counter += 4 * LANES;
+  rng->read = 0;
 }
 
 void

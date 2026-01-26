@@ -1,0 +1,87 @@
+BasedOnStyle: LLVM
+
+Language:        Cpp   # clang-format uses Cpp for C too
+Standard:        Cpp11 # closest option; formatting still fine for C17
+
+# --- Indentation & layout ---
+IndentWidth:     2
+TabWidth:        2
+UseTab:          Never
+
+ColumnLimit:     0        # Don't hard wrap code (comments handled manually)
+ContinuationIndentWidth: 2
+
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: true
+AllowShortBlocksOnASingleLine:       Never
+AllowShortFunctionsOnASingleLine:    None
+
+# Encourages:
+# if( x ) {
+#   ...
+# }
+SpaceBeforeParens: ControlStatements
+SpaceBeforeParensOptions:
+  AfterControlStatements: true   # if( x )
+  AfterFunctionDeclarationName: false
+  AfterFunctionDefinitionName:  false
+  AfterForeachMacros: true
+  AfterIfMacros: true
+  AfterOverloadedOperator: false
+  BeforeNonEmptyParentheses: false
+
+# --- Spaces inside parentheses ---
+SpacesInParentheses:        true     # foo( x )
+SpacesInSquareBrackets:     false
+SpacesInAngles:             false
+SpaceInEmptyParentheses:    false    # abort()
+
+# But we still want: sizeof(fd_type)
+SpaceAfterCStyleCast:       false
+
+# --- Function calls & declarations ---
+PenaltyBreakBeforeFirstCallParameter: 1000000  # keep args on same line when possible
+BinPackArguments:        false
+BinPackParameters:       false
+AllowAllArgumentsOnNextLine: false
+
+# Helps with your vertically-aligned prototypes
+AlwaysBreakAfterReturnType: All
+AlwaysBreakAfterDefinitionReturnType: All
+PenaltyReturnTypeOnItsOwnLine: 0
+
+# --- Alignment (IMPORTANT FOR FIREDANCER STYLE) ---
+AlignConsecutiveAssignments:  Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros:       Consecutive
+AlignOperands:                Align
+AlignTrailingComments:        true
+
+# --- Pointer style ---
+PointerAlignment: Left   # char const * x
+
+# --- Control flow ---
+AllowShortLoopsOnASingleLine: true
+
+# --- Preprocessor ---
+IndentPPDirectives: None
+AlignEscapedNewlines: Left
+
+# --- Includes ---
+SortIncludes: Never   # Firedancer seems to prefer manual include ordering
+
+# --- Misc ---
+DerivePointerAlignment: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+
+# Macros that behave like control flow
+StatementMacros:
+  - FD_LOG_CRIT
+  - FD_LOG_NOTICE
+  - FD_LOG_WARNING
+  - FD_UNLIKELY
+  - FD_LIKELY
+
+ForEachMacros:
+  - FD_FOR_EACH

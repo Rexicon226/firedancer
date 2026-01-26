@@ -63,8 +63,8 @@ fd_chacha_rng_init( fd_chacha_rng_t * rng,
                     void const *      key,
                     int               algo ) {
   memcpy( rng->key, key, FD_CHACHA_KEY_SZ );
-  rng->buf_off  = 0UL;
-  rng->buf_fill = 0UL;
+  rng->read  = 0UL;
+  rng->counter = 0UL;
 
   /* invalid algo defaults to chacha20 */
   rng->algo = algo;
@@ -77,29 +77,29 @@ fd_chacha_rng_init( fd_chacha_rng_t * rng,
   return rng;
 }
 
-static void
-fd_chacha_rng_refill_seq( fd_chacha_rng_t * rng,
-                          void * (* block_fn)( void *, void const *, void const * ) ) {
-  ulong fill_target = FD_CHACHA_RNG_BUFSZ - FD_CHACHA_BLOCK_SZ;
+// static void
+// fd_chacha_rng_refill_seq( fd_chacha_rng_t * rng,
+//                           void * (* block_fn)( void *, void const *, void const * ) ) {
+//   ulong fill_target = FD_CHACHA_RNG_BUFSZ - FD_CHACHA_BLOCK_SZ;
 
-  ulong buf_avail;
-  while( (buf_avail=(rng->buf_fill - rng->buf_off))<fill_target ) {
-    ulong idx = rng->buf_fill >> 6;
-    uint idx_nonce[4] __attribute__((aligned(16))) =
-      { (uint)idx, 0U, 0U, 0U };
-    block_fn( rng->buf + (rng->buf_fill % FD_CHACHA_RNG_BUFSZ),
-              rng->key,
-              idx_nonce );
-    rng->buf_fill += (uint)FD_CHACHA_BLOCK_SZ;
-  }
-}
+//   ulong buf_avail;
+//   while( (buf_avail=(rng->buf_fill - rng->buf_off))<fill_target ) {
+//     ulong idx = rng->buf_fill >> 6;
+//     uint idx_nonce[4] __attribute__((aligned(16))) =
+//       { (uint)idx, 0U, 0U, 0U };
+//     block_fn( rng->buf + (rng->buf_fill % FD_CHACHA_RNG_BUFSZ),
+//               rng->key,
+//               idx_nonce );
+//     rng->buf_fill += (uint)FD_CHACHA_BLOCK_SZ;
+//   }
+// }
 
-void
-fd_chacha8_rng_refill_seq( fd_chacha_rng_t * rng ) {
-  fd_chacha_rng_refill_seq( rng, fd_chacha8_block );
-}
+// void
+// fd_chacha8_rng_refill_seq( fd_chacha_rng_t * rng ) {
+//   fd_chacha_rng_refill_seq( rng, fd_chacha8_block );
+// }
 
-void
-fd_chacha20_rng_refill_seq( fd_chacha_rng_t * rng ) {
-  fd_chacha_rng_refill_seq( rng, fd_chacha20_block );
-}
+// void
+// fd_chacha20_rng_refill_seq( fd_chacha_rng_t * rng ) {
+//   fd_chacha_rng_refill_seq( rng, fd_chacha20_block );
+// }

@@ -29,8 +29,11 @@
 /* FD_CHACHA_RNG_BUFSZ is the internal buffer size of pre-generated
    ChaCha20 blocks.  Multiple of block size (64 bytes) and a power of 2. */
 
+#define LANES 4
+
 #if FD_HAS_AVX512
-#define FD_CHACHA_RNG_BUFSZ (16*FD_CHACHA_BLOCK_SZ)
+// #define FD_CHACHA_RNG_BUFSZ (16*FD_CHACHA_BLOCK_SZ)
+#define FD_CHACHA_RNG_BUFSZ LANES * 64 * 4
 #elif FD_HAS_AVX
 #define FD_CHACHA_RNG_BUFSZ (8*FD_CHACHA_BLOCK_SZ)
 #else
@@ -47,8 +50,8 @@ struct __attribute__((aligned(32UL))) fd_chacha_rng_private {
            increments of 8.  Thus, we really only have to refill the
            buffer if buf_off==buf_fill.  */
   uchar buf[ FD_CHACHA_RNG_BUFSZ ] __attribute__((aligned(FD_CHACHA_BLOCK_SZ)));
-  ulong buf_off;   /* Total number of bytes consumed */
-  ulong buf_fill;  /* Total number of bytes produced
+  ulong counter;   /* Total number of bytes consumed */
+  ulong read;      /* Total number of bytes produced
                       Always aligned by FD_CHACHA_BLOCK_SZ */
 
   int mode;
@@ -145,36 +148,36 @@ void fd_chacha20_rng_refill_seq( fd_chacha_rng_t * rng );
 #if FD_HAS_AVX512
 #define fd_chacha8_rng_private_refill  fd_chacha8_rng_refill_avx512
 #define fd_chacha20_rng_private_refill fd_chacha20_rng_refill_avx512
-#elif FD_HAS_AVX
-#define fd_chacha8_rng_private_refill  fd_chacha8_rng_refill_avx
-#define fd_chacha20_rng_private_refill fd_chacha20_rng_refill_avx
-#else
-#define fd_chacha8_rng_private_refill  fd_chacha8_rng_refill_seq
-#define fd_chacha20_rng_private_refill fd_chacha20_rng_refill_seq
+// #elif FD_HAS_AVX
+// #define fd_chacha8_rng_private_refill  fd_chacha8_rng_refill_avx
+// #define fd_chacha20_rng_private_refill fd_chacha20_rng_refill_avx
+// #else
+// #define fd_chacha8_rng_private_refill  fd_chacha8_rng_refill_seq
+// #define fd_chacha20_rng_private_refill fd_chacha20_rng_refill_seq
 #endif
 
 /* fd_chacha_rng_avail returns the number of buffered bytes. */
 
-FD_FN_PURE static inline ulong
-fd_chacha_rng_avail( fd_chacha_rng_t const * rng ) {
-  return rng->buf_fill - rng->buf_off;
-}
+// FD_FN_PURE static inline ulong
+// fd_chacha_rng_avail( fd_chacha_rng_t const * rng ) {
+//   return rng->buf_fill - rng->buf_off;
+// }
 
 /* fd_chacha_rng_ulong read a 64-bit integer in [0,2^64) from the
    RNG stream. */
 
 static inline ulong
 fd_chacha_rng_ulong( fd_chacha_rng_t * rng ) {
-  if( FD_UNLIKELY( fd_chacha_rng_avail( rng ) < sizeof(ulong) ) ) {
-    if( rng->algo==FD_CHACHA_RNG_ALGO_CHACHA8 ) {
-      fd_chacha8_rng_private_refill( rng );
-    } else {
-      fd_chacha20_rng_private_refill( rng );
-    }
-  }
-  ulong x = FD_LOAD( ulong, rng->buf + (rng->buf_off % FD_CHACHA_RNG_BUFSZ) );
-  rng->buf_off += 8U;
-  return x;
+   if ( rng->read == ((64 * 4 * LANES) / 8) ) {
+      if( rng->algo==FD_CHACHA_RNG_ALGO_CHACHA8 ) {
+         fd_chacha8_rng_private_refill( rng );
+      } else {
+         fd_chacha20_rng_private_refill( rng );
+      }
+   }
+   ulong x = FD_LOAD( ulong, rng->buf + (rng->read * 8) );
+   rng->read += 1U;
+   return x;
 }
 
 /* fd_chacha_rng_ulong_roll returns an uniform IID rand in [0,n)
