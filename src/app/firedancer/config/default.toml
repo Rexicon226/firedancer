@@ -950,10 +950,17 @@ telemetry = true
     mount_path = "/mnt/.fd"
 
     # The largest supported page size to use and allocate from.
-    # Possible values are either "huge" (2 MiB) or "gigantic" (1 GiB).
-    # Larger sizes yield better performance.  Smaller values may be
-    # required on virtualized environments like cloud providers, or can
+    # Possible values are "normal" (4 KiB), "huge" (2 MiB) or "gigantic"
+    # (1 GiB).  Larger sizes yield better performance.  Smaller values may
+    # be required on virtualized environments like cloud providers, or can
     # be used during development or testing to save memory.
+    #
+    # "normal" backs resident workspaces with mlocked 4 KiB pages instead
+    # of huge pages.  This avoids reserving any huge pages (which can be
+    # impossible at runtime on fragmented or long-running hosts), at the
+    # cost of throughput.  Combined with swap_large_workspaces_to_disk, it
+    # lets hosts that cannot reserve huge pages run with a small resident
+    # set.  Note: tile stacks still require a small number of huge pages.
     max_page_size = "gigantic"
 
     # Workspaces are either fully backed by "huge" or "gigantic" pages.
@@ -964,6 +971,33 @@ telemetry = true
     # It is not recommended to change this value, except in development
     # or test environments to decrease memory usage.
     gigantic_page_threshold_mib = 128
+
+    # If true, large data workspaces are backed by normal (4 KiB) pages in
+    # a regular file under a .normal subdirectory of mount_path, instead of
+    # by mlocked huge/gigantic pages.  These workspaces are left un-mlocked
+    # so the kernel page cache can spill cold pages to disk under memory
+    # pressure, trading throughput for a much smaller resident set.  Hot
+    # inter-tile link workspaces (mcaches/dcaches) and small tiles stay
+    # resident; the largest workspaces (accounts database, banks, block
+    # store, transaction cache, FEC sets, etc.) spill first.  This is
+    # intended for hosts with high disk capacity but low RAM (e.g. 64 GiB),
+    # where the validator would otherwise be killed by the OOM killer.  For
+    # pages to actually offload to disk, mount_path must be on a disk-backed
+    # filesystem with enough free capacity to hold these workspaces.
+    swap_large_workspaces_to_disk = false
+
+    # When swap_large_workspaces_to_disk is true, the target maximum
+    # resident (mlocked, RAM-backed) workspace footprint, in MiB.  Hot
+    # inter-tile link workspaces (mcaches and dcaches) are always kept
+    # resident; the largest of the remaining workspaces are then spilled to
+    # disk until the resident set fits within this budget.  Because the
+    # largest workspaces spill first, small latency-sensitive tiles (e.g.
+    # gossip) stay resident as long as the budget has room.
+    #
+    # A value of 0 defaults the budget to 75% of the host's physical RAM,
+    # which keeps as much resident as will comfortably fit.  Lower it to
+    # spill more aggressively, or raise it to keep more in RAM.
+    swap_resident_budget_mib = 0
 
 # The network stack is provided by net tiles, which are responsible for
 # sending and receiving packets on the network.

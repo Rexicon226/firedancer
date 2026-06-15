@@ -380,6 +380,7 @@ dump_cmd_fn( args_t      * args,
                0UL,          /* lazy */
                rng,          /* rng */
                scratch,      /* scratch */
+               0,            /* cooperative_idle */
                &ctx );       /* ctx */
 
     for( ulong i=0UL; i<ctx.link_cnt; i++ ) {

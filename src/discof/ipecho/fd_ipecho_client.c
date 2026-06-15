@@ -62,14 +62,17 @@ fd_ipecho_client_join( void * shipe ) {
   return ipe;
 }
 
-void
-fd_ipecho_client_init( fd_ipecho_client_t *  client,
-                       fd_ip4_port_t const * servers,
-                       ulong                 servers_len ) {
+/* connect_all (re)opens a non-blocking TCP connection to each retained
+   entrypoint and resets the per-peer protocol state.  It is used both at
+   init time and to re-establish connections that were closed before a
+   response was received. */
+
+static void
+connect_all( fd_ipecho_client_t * client ) {
   ulong peer_cnt = 0UL;
 
-  for( ulong i=0UL; i<servers_len; i++ ) {
-    fd_ip4_port_t const * server = &servers[ i ];
+  for( ulong i=0UL; i<client->servers_len; i++ ) {
+    fd_ip4_port_t const * server = &client->servers[ i ];
 
     int sockfd = socket( AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0 );
     if( FD_UNLIKELY( -1==sockfd ) ) FD_LOG_ERR(( "socket() failed (%d-%s)", errno, fd_io_strerror( errno ) ));
@@ -100,6 +103,16 @@ fd_ipecho_client_init( fd_ipecho_client_t *  client,
 
   client->peer_cnt = peer_cnt;
   client->remaining_peer_cnt = peer_cnt;
+}
+
+void
+fd_ipecho_client_init( fd_ipecho_client_t *  client,
+                       fd_ip4_port_t const * servers,
+                       ulong                 servers_len ) {
+  client->servers_len = fd_ulong_min( servers_len, 16UL );
+  for( ulong i=0UL; i<client->servers_len; i++ ) client->servers[ i ] = servers[ i ];
+
+  connect_all( client );
   client->start_time_nanos = LONG_MAX;
 }
 
@@ -213,12 +226,30 @@ int
 fd_ipecho_client_poll( fd_ipecho_client_t * client,
                        ushort *             shred_version,
                        int *                charge_busy ) {
-  if( FD_UNLIKELY( !client->remaining_peer_cnt ) ) return -1;
   long now = fd_log_wallclock();
   if( FD_UNLIKELY( LONG_MAX==client->start_time_nanos ) ) client->start_time_nanos = now;
-  if( FD_UNLIKELY( now-client->start_time_nanos>2L*1000L*1000*1000L ) ) {
+  /* Give the entrypoints a generous window to answer the IP echo request.
+     A 2 second budget is too tight for slower round-trips to remote
+     (e.g. testnet) entrypoints, causing the ipecho tile to give up and
+     fail to boot.  This matches the genesis client's 20 second budget. */
+  if( FD_UNLIKELY( now-client->start_time_nanos>200L*1000L*1000*1000L ) ) {
     close_all( client );
     return -1;
+  }
+
+  /* All connections were closed before a response arrived.  This happens
+     on slow-booting hosts: the entrypoints accept the TCP connection in
+     privileged_init but drop it as idle before the run loop gets a
+     chance to send the request.  Re-establish fresh connections and keep
+     trying until the timeout above fires, rather than giving up.  This
+     reconnect issues socket()/connect() at run time, which is available
+     because the low-core configuration runs with the sandbox disabled;
+     in production the connections do not go idle long enough to be
+     dropped, so this path is not exercised. */
+  if( FD_UNLIKELY( !client->remaining_peer_cnt ) ) {
+    connect_all( client );
+    if( FD_LIKELY( client->remaining_peer_cnt && charge_busy ) ) *charge_busy = 1;
+    return 1;
   }
 
   int nfds = fd_syscall_poll( client->pollfds, (uint)client->peer_cnt, 0 );

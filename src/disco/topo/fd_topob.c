@@ -3,6 +3,8 @@
 #include "../../util/pod/fd_pod_format.h"
 #include "fd_cpu_topo.h"
 
+#include <unistd.h> /* sysconf */
+
 #define SET_NAME cpu_bv
 #define SET_MAX  FD_TILE_MAX
 #include "../../util/tmpl/fd_set.c"
@@ -480,7 +482,9 @@ auto_tile_cpu( fd_topo_tile_t * tile,
   ulong cpu_cnt = cpus->cpu_cnt;
   while( cpu_idx<cpu_cnt && cpu_bv_test( cpu_assigned, cpu_ordering[ cpu_idx ] ) ) cpu_idx++;
   if( FD_UNLIKELY( cpu_idx>=cpu_cnt ) ) {
-    FD_LOG_ERR(( "auto layout cannot set affinity for tile `%s:%lu` because all the CPUs are already assigned", tile->name, tile->kind_id ));
+    FD_LOG_WARNING(( "auto layout cannot set affinity for tile `%s:%lu` because all the CPUs are already assigned. Leaving it floating", tile->name, tile->kind_id ));
+    *cpu_idx_p = cpu_idx;
+    return;
   }
 
   /* Certain tiles are latency and throughput critical and
@@ -503,7 +507,11 @@ auto_tile_cpu( fd_topo_tile_t * tile,
            ( cpus->cpu[ cpu_ordering[ try_assign ] ].sibling!=ULONG_MAX &&
              cpu_bv_test( cpu_assigned, cpus->cpu[ cpu_ordering[ try_assign ] ].sibling ) ) ) {
       try_assign++;
-      if( FD_UNLIKELY( try_assign>=cpus->cpu_cnt ) ) FD_LOG_ERR(( "auto layout cannot set affinity for tile `%s:%lu` because all the CPUs are already assigned or have a HT pair assigned", tile->name, tile->kind_id ));
+      if( FD_UNLIKELY( try_assign>=cpus->cpu_cnt ) ) {
+        FD_LOG_WARNING(( "auto layout cannot set affinity for tile `%s:%lu` because all the CPUs are already assigned or have a HT pair assigned. Leaving it floating", tile->name, tile->kind_id ));
+        *cpu_idx_p = cpu_idx;
+        return;
+      }
     }
 
     ulong sibling = cpus->cpu[ cpu_ordering[ try_assign ] ].sibling;
@@ -754,6 +762,18 @@ initialize_numa_assignments( fd_topo_t * topo ) {
   }
 }
 
+/* nonswap_backing_sz returns the number of bytes a workspace with the
+   given base footprint would occupy in DRAM if it were backed by mlocked
+   huge/gigantic pages (i.e. not swapped to disk).  This is the resident
+   cost the swap budget logic accounts for. */
+static ulong
+nonswap_backing_sz( fd_topo_t const * topo,
+                    ulong             base_footprint ) {
+  ulong page_sz = topo->max_page_size;
+  if( page_sz==FD_SHMEM_GIGANTIC_PAGE_SZ && base_footprint < topo->gigantic_page_threshold ) page_sz = FD_SHMEM_HUGE_PAGE_SZ;
+  return fd_ulong_align_up( base_footprint, page_sz );
+}
+
 void
 fd_topob_finish( fd_topo_t *                topo,
                  fd_topo_obj_callbacks_t ** callbacks ) {
@@ -769,6 +789,12 @@ fd_topob_finish( fd_topo_t *                topo,
     FD_TEST( !fd_pod_replacef_ulong( topo->props, in_cnt, "obj.%lu.in_cnt", tile->metrics_obj_id ) );
   }
 
+  /* Pass 1: compute each workspace's base footprint (the number of bytes
+     it must hold, before rounding up to a page size).  We also assign
+     object offsets/footprints and part_max here.  The page size and final
+     footprint are deferred to pass 2, because the swappability decision
+     below depends on knowing the size of every workspace first. */
+  ulong base_footprint[ FD_TOPO_MAX_WKSPS ];
   for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
     fd_topo_wksp_t * wksp = &topo->workspaces[ i ];
 
@@ -825,19 +851,93 @@ fd_topob_finish( fd_topo_t *                topo,
 
     /* Compute footprint for a workspace that can store our footprint,
        with an extra align of padding incase gaddr_lo is not aligned. */
-    ulong total_wksp_footprint = fd_wksp_footprint( part_max, footprint + fd_topo_workspace_align() + loose_sz );
+    wksp->part_max         = part_max;
+    wksp->known_footprint  = footprint;
+    base_footprint[ i ]    = fd_wksp_footprint( part_max, footprint + fd_topo_workspace_align() + loose_sz );
+  }
 
-    ulong page_sz = topo->max_page_size;
-    if( total_wksp_footprint < topo->gigantic_page_threshold ) page_sz = FD_SHMEM_HUGE_PAGE_SZ;
-    if( FD_UNLIKELY( page_sz!=FD_SHMEM_HUGE_PAGE_SZ && page_sz!=FD_SHMEM_GIGANTIC_PAGE_SZ ) ) FD_LOG_ERR(( "invalid page_sz" ));
+  /* Decide which workspaces spill to disk.  When swap_large_wksps is
+     enabled, we keep the hot inter-tile IPC workspaces (those holding an
+     mcache or dcache) resident in mlocked pages, and make the largest of
+     the remaining workspaces swappable (normal pages in an on-disk file,
+     un-mlocked) until the resident set fits within the budget.  Because we
+     always spill the largest workspaces first, small latency-sensitive
+     tiles (e.g. gossip, sign, the networking tiles) stay resident as long
+     as the budget has room -- only the giant data stores spill.
 
-    ulong wksp_aligned_footprint = fd_ulong_align_up( total_wksp_footprint, page_sz );
+     If no explicit budget is configured (swap_resident_budget==0) we
+     default to a fraction of the host's physical RAM, so the validator
+     keeps as much resident as will fit rather than aggressively spilling
+     everything (which would starve hot tiles and break, e.g., gossip). */
+  if( FD_UNLIKELY( topo->swap_large_wksps ) ) {
+    int keep_resident[ FD_TOPO_MAX_WKSPS ] = {0};
+    for( ulong i=0UL; i<topo->link_cnt; i++ ) {
+      fd_topo_link_t const * link = &topo->links[ i ];
+      keep_resident[ topo->objs[ link->mcache_obj_id ].wksp_id ] = 1;
+      if( link->mtu ) keep_resident[ topo->objs[ link->dcache_obj_id ].wksp_id ] = 1;
+    }
+
+    ulong resident = 0UL;
+    for( ulong i=0UL; i<topo->wksp_cnt; i++ ) resident += nonswap_backing_sz( topo, base_footprint[ i ] );
+
+    ulong budget = topo->swap_resident_budget;
+    if( !budget ) {
+      /* Default budget: keep ~75% of physical RAM resident, reserving the
+         rest for tile stacks, page tables, the page cache backing the
+         swapped workspaces, and the OS. */
+      long phys_pages = sysconf( _SC_PHYS_PAGES );
+      long page_sz    = sysconf( _SC_PAGESIZE );
+      if( FD_LIKELY( phys_pages>0L && page_sz>0L ) ) {
+        budget = ((ulong)phys_pages*(ulong)page_sz/4UL)*3UL;
+        FD_LOG_NOTICE(( "swap: no [hugetlbfs.swap_resident_budget_mib] set, defaulting to %lu MiB (75%% of physical RAM)", budget>>20 ));
+      }
+    }
+    for(;;) {
+      if( budget && resident<=budget ) break;
+
+      /* Pick the largest eligible (non-link, not yet swapped) workspace. */
+      ulong best_idx = ULONG_MAX;
+      ulong best_sz  = 0UL;
+      for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
+        if( topo->workspaces[ i ].is_swappable || keep_resident[ i ] ) continue;
+        ulong sz = nonswap_backing_sz( topo, base_footprint[ i ] );
+        if( sz>best_sz ) { best_sz = sz; best_idx = i; }
+      }
+      if( best_idx==ULONG_MAX ) break; /* nothing left we are willing to swap */
+
+      topo->workspaces[ best_idx ].is_swappable = 1;
+      resident -= best_sz;
+    }
+
+    if( FD_UNLIKELY( budget && resident>budget ) )
+      FD_LOG_WARNING(( "could not fit resident workspaces within the %lu MiB swap budget; the resident set is %lu MiB after spilling all eligible workspaces to disk",
+                       budget>>20, resident>>20 ));
+  }
+
+  /* Pass 2: assign each workspace a page size and final footprint based on
+     the swappability decision above. */
+  for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
+    fd_topo_wksp_t * wksp = &topo->workspaces[ i ];
+
+    /* Workspaces flagged as swappable are backed by normal (4 KiB) pages
+       in a regular on-disk file and are left un-mlocked, so that the
+       kernel page cache can spill cold pages to disk under memory
+       pressure.  All other workspaces stay on mlocked huge/gigantic
+       pages. */
+    ulong page_sz;
+    if( FD_UNLIKELY( wksp->is_swappable ) ) {
+      page_sz = FD_SHMEM_NORMAL_PAGE_SZ;
+    } else {
+      page_sz = topo->max_page_size;
+      if( page_sz==FD_SHMEM_GIGANTIC_PAGE_SZ && base_footprint[ i ] < topo->gigantic_page_threshold ) page_sz = FD_SHMEM_HUGE_PAGE_SZ;
+      if( FD_UNLIKELY( page_sz!=FD_SHMEM_NORMAL_PAGE_SZ && page_sz!=FD_SHMEM_HUGE_PAGE_SZ && page_sz!=FD_SHMEM_GIGANTIC_PAGE_SZ ) ) FD_LOG_ERR(( "invalid page_sz" ));
+    }
+
+    ulong wksp_aligned_footprint = fd_ulong_align_up( base_footprint[ i ], page_sz );
 
     /* Give any leftover space in the underlying shared memory to the
        data region of the workspace, since we might as well use it. */
-    wksp->part_max = part_max;
-    wksp->known_footprint = footprint;
-    wksp->total_footprint = wksp_aligned_footprint - fd_ulong_align_up( fd_wksp_private_data_off( part_max ), fd_topo_workspace_align() );
+    wksp->total_footprint = wksp_aligned_footprint - fd_ulong_align_up( fd_wksp_private_data_off( wksp->part_max ), fd_topo_workspace_align() );
     wksp->page_sz = page_sz;
     wksp->page_cnt = wksp_aligned_footprint / page_sz;
   }

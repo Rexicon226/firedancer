@@ -8,6 +8,7 @@
 
 #include <stdalign.h> /* alignof */
 #include <errno.h>
+#include <limits.h> /* UINT_MAX */
 #include <fcntl.h> /* fcntl */
 #include <unistd.h> /* dup3, close */
 #include <netinet/in.h> /* sockaddr_in */
@@ -27,11 +28,6 @@
 /* Controls max ancillary data size.
    Must be aligned by alignof(struct cmsghdr) */
 #define FD_SOCK_CMSG_MAX (64UL)
-
-/* Value of the sock_idx for Firedancer repair intake.
-   Used to determine whether repair packets should go to shred vs repair tile.
-   This value is validated at startup. */
-#define REPAIR_SHRED_SOCKET_ID (4U)
 
 static ulong
 populate_allowed_seccomp( fd_topo_t const *      topo,
@@ -170,7 +166,8 @@ privileged_init( fd_topo_t const *      topo,
   fd_memset( batch_sa,  0, STEM_BURST*sizeof(struct sockaddr_in) );
   fd_memset( batch_msg, 0, STEM_BURST*sizeof(struct mmsghdr)     );
 
-  ctx->batch_cnt   = 0UL;
+  ctx->batch_cnt            = 0UL;
+  ctx->repair_shred_sock_idx = UINT_MAX;
   ctx->batch_iov   = batch_iov;
   ctx->batch_cmsg  = batch_cmsg;
   ctx->batch_sa    = batch_sa;
@@ -216,11 +213,6 @@ privileged_init( fd_topo_t const *      topo,
     if( sock_idx>=FD_SOCK_TILE_MAX_SOCKETS ) FD_LOG_ERR(( "too many sockets" ));
     ushort port = (ushort)udp_port_candidates[ candidate_idx ];
 
-    /* Validate value of REPAIR_SHRED_SOCKET_ID */
-    if( tile->sock.net.repair_client_listen_port &&
-       udp_port_candidates[candidate_idx]==tile->sock.net.repair_client_listen_port )
-      FD_TEST( sock_idx==REPAIR_SHRED_SOCKET_ID );
-
     char const * target_link = udp_port_links[ candidate_idx ];
     ctx->link_rx_map[ sock_idx ] = 0xFF;
     for( ulong j=0UL; j<(tile->out_cnt); j++ ) {
@@ -236,6 +228,12 @@ privileged_init( fd_topo_t const *      topo,
          i.e. the repair server is disabled, then no net_rserve link. */
       continue;
     }
+
+    /* Record the socket index of the repair intake socket, so repair
+       ping packets can be routed to the repair tile at runtime. */
+    if( tile->sock.net.repair_client_listen_port &&
+        udp_port_candidates[ candidate_idx ]==tile->sock.net.repair_client_listen_port )
+      ctx->repair_shred_sock_idx = sock_idx;
 
     int sock_fd = sock_fd_min + (int)sock_idx;
     create_udp_socket( sock_fd, tile->sock.net.bind_address, port, tile->sock.so_rcvbuf );
@@ -262,7 +260,6 @@ privileged_init( fd_topo_t const *      topo,
 
   ctx->tx_sock      = tx_sock;
   ctx->bind_address = tile->sock.net.bind_address;
-
 }
 
 static void
@@ -293,7 +290,6 @@ unprivileged_init( fd_topo_t const *      topo,
                    tile->out_link_id[ i ], link->burst, STEM_BURST ));
     }
   }
-  if( FD_UNLIKELY( ctx->repair_rx==0xFF ) ) FD_LOG_ERR(( "no net_repair out links" ));
 
   for( ulong i=0UL; i<(tile->in_cnt); i++ ) {
     if( !strstr( topo->links[ tile->in_link_id[ i ] ].name, "_net" ) ) {
@@ -427,7 +423,7 @@ poll_rx_socket( fd_sock_tile_t *    ctx,
        the frame size), then it is sent to the repair tile.
        The repair tile does not own any sockets, so we look up the
        net_repair link directly.*/
-    if( FD_UNLIKELY( sock_idx==REPAIR_SHRED_SOCKET_ID && frame_sz==REPAIR_PING_SZ ) ) {
+    if( FD_UNLIKELY( sock_idx==ctx->repair_shred_sock_idx && frame_sz==REPAIR_PING_SZ ) ) {
       fd_sock_link_rx_t * repair_link = ctx->link_rx + ctx->repair_rx;
       uchar * repair_buf = fd_chunk_to_laddr( repair_link->base, repair_link->chunk );
       memcpy( repair_buf, eth_hdr, frame_sz );
@@ -683,14 +679,28 @@ after_credit( fd_sock_tile_t *    ctx,
               fd_stem_context_t * stem,
               int *               poll_in FD_PARAM_UNUSED,
               int *               charge_busy ) {
-  if( ctx->tx_idle_cnt > 512 ) {
+  /* Poll RX either after the TX batch has been idle for a while (the
+     common busy-spin path), or once the wall-clock RX deadline elapses.
+     The deadline bounds RX latency when TX is sustained (tx_idle_cnt
+     keeps resetting) or when the cooperative idle backoff is sleeping
+     between iterations, both of which would otherwise starve RX. */
+  long now = fd_log_wallclock();
+  if( ctx->tx_idle_cnt > 512 || FD_UNLIKELY( now>=ctx->rx_next_ns ) ) {
     if( ctx->batch_cnt ) {
       flush_tx_batch( ctx );
     }
     ulong pkt_cnt = poll_rx( ctx, stem );
     *charge_busy = pkt_cnt!=0;
+    ctx->rx_next_ns = now + (long)100e3; /* poll RX at least every 100 us */
   }
   ctx->tx_idle_cnt++;
+
+  /* Treat a pending (not yet flushed) TX batch as work so the stem run
+     loop does not put this tile to sleep while outbound packets are
+     buffered.  Otherwise, under cooperative idle backoff on an
+     oversubscribed host, the partial batch would not flush until 512
+     sleepy iterations elapse, stalling sends. */
+  if( FD_UNLIKELY( ctx->batch_cnt ) ) *charge_busy = 1;
 }
 
 static void

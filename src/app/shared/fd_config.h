@@ -312,6 +312,8 @@ struct fd_config {
     char  mount_path[ PATH_MAX ];
     char  max_page_size[ 16 ];
     ulong gigantic_page_threshold_mib;
+    int   swap_large_workspaces_to_disk;
+    ulong swap_resident_budget_mib;
   } hugetlbfs;
 
   fd_config_net_t net;

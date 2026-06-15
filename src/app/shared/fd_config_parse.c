@@ -179,6 +179,8 @@ fd_config_extract_pod( uchar *       pod,
   CFG_POP      ( cstr,   hugetlbfs.mount_path                             );
   CFG_POP      ( cstr,   hugetlbfs.max_page_size                          );
   CFG_POP      ( ulong,  hugetlbfs.gigantic_page_threshold_mib            );
+  CFG_POP      ( bool,   hugetlbfs.swap_large_workspaces_to_disk          );
+  CFG_POP      ( ulong,  hugetlbfs.swap_resident_budget_mib               );
 
   CFG_POP      ( cstr,   net.interface                                    );
   CFG_POP      ( cstr,   net.bind_address                                 );

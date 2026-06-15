@@ -68,6 +68,7 @@ poll_client( fd_ipecho_tile_ctx_t * ctx,
              int *                  charge_busy ) {
   if( FD_UNLIKELY( !ctx->client ) ) return;
 
+
   ushort shred_version;
   int result = fd_ipecho_client_poll( ctx->client, &shred_version, charge_busy );
   if( FD_UNLIKELY( !result ) ) {
@@ -76,7 +77,7 @@ poll_client( fd_ipecho_tile_ctx_t * ctx,
                    ctx->expected_shred_version, shred_version ));
     }
 
-    FD_LOG_INFO(( "retrieved shred version %hu from entrypoint", shred_version ));
+    FD_LOG_NOTICE(( "ipecho PUBLISHING shred_version=%hu from ENTRYPOINT", shred_version ));
     FD_MGAUGE_SET( IPECHO, CURRENT_SHRED_VERSION, shred_version );
     fd_stem_publish( stem, 0UL, shred_version, 0UL, 0UL, 0UL, 0UL, 0UL );
     fd_ipecho_server_set_shred_version( ctx->server, shred_version );
@@ -119,10 +120,16 @@ returnable_frag( fd_ipecho_tile_ctx_t * ctx,
   (void)in_idx; (void)seq; (void)sig; (void)sz; (void)ctl; (void)tspub;
   fd_genesis_meta_t const * genesis_meta = fd_chunk_to_laddr( ctx->genesi_in_mem, chunk );
 
+  /* TEMP DEBUG: which shred-version source wins, and what value. */
+  FD_LOG_NOTICE(( "ipecho returnable_frag: genesis bootstrap=%d genesis_shred_version=%hu",
+                  genesis_meta->bootstrap,
+                  compute_shred_version( genesis_meta->genesis_hash.uc, NULL, 0UL ) ));
+
   if( FD_UNLIKELY( genesis_meta->bootstrap ) ) {
     ushort shred_version = compute_shred_version( genesis_meta->genesis_hash.uc, NULL, 0UL );
     FD_TEST( shred_version );
 
+    FD_LOG_NOTICE(( "ipecho PUBLISHING shred_version=%hu from GENESIS (bootstrap)", shred_version ));
     FD_MGAUGE_SET( IPECHO, CURRENT_SHRED_VERSION, shred_version );
     fd_stem_publish( stem, 0UL, shred_version, 0UL, 0UL, 0UL, tsorig, fd_frag_meta_ts_comp( fd_tickcount() ) );
     fd_ipecho_server_set_shred_version( ctx->server, shred_version );

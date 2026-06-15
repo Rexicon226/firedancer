@@ -173,6 +173,23 @@ init( config_t const * config ) {
     if( FD_UNLIKELY( chmod( mount_path[ i ], S_IRUSR | S_IWUSR | S_IXUSR ) ) )
       FD_LOG_ERR(( "chmod of hugetlbfs at `%s` failed (%i-%s)", mount_path[ i ], errno, fd_io_strerror( errno ) ));
   }
+
+  /* When any workspace is backed by normal (4 KiB) pages -- either because
+     swappable workspaces are enabled, or because max_page_size is "normal"
+     (resident workspaces on 4 KiB pages, e.g. on hosts that cannot reserve
+     huge pages) -- create a regular (non-hugetlbfs) directory for their
+     backing files.  Unlike the huge and gigantic directories this is NOT a
+     hugetlbfs mount: it is a plain directory on whatever filesystem
+     mount_path lives on, so swappable pages can be written back to disk. */
+  if( FD_UNLIKELY( config->hugetlbfs.swap_large_workspaces_to_disk ||
+                   !strcmp( config->hugetlbfs.max_page_size, "normal" ) ) ) {
+    char const * normal_path = config->hugetlbfs.normal_page_mount_path;
+    FD_LOG_NOTICE(( "RUN: `mkdir -p %s`", normal_path ));
+    if( FD_UNLIKELY( -1==fd_file_util_mkdir_all( normal_path, config->uid, config->gid, 1 ) ) )
+      FD_LOG_ERR(( "could not create normal page directory `%s` (%i-%s)", normal_path, errno, fd_io_strerror( errno ) ));
+    if( FD_UNLIKELY( chmod( normal_path, S_IRUSR | S_IWUSR | S_IXUSR ) ) )
+      FD_LOG_ERR(( "chmod of `%s` failed (%i-%s)", normal_path, errno, fd_io_strerror( errno ) ));
+  }
 }
 
 static void
@@ -277,6 +294,32 @@ fini( config_t const * config,
       FD_LOG_ERR(( "error reading `/proc/self/mounts` (%i-%s)", errno, fd_io_strerror( errno ) ));
     if( FD_LIKELY( fclose( fp ) ) )
       FD_LOG_ERR(( "error closing `/proc/self/mounts` (%i-%s)", errno, fd_io_strerror( errno ) ));
+
+    /* The normal page directory is a regular on-disk directory (not a
+       hugetlbfs mount), so its workspace backing files persist and must be
+       unlinked before the directory can be removed. */
+    if( FD_UNLIKELY( i==2UL ) ) {
+      DIR * dir = opendir( mount_path[ i ] );
+      if( FD_LIKELY( dir ) ) {
+        struct dirent * entry;
+        for(;;) {
+          errno = 0;
+          entry = readdir( dir );
+          if( FD_UNLIKELY( !entry ) ) break;
+          if( FD_UNLIKELY( !strcmp( entry->d_name, "." ) || !strcmp( entry->d_name, ".." ) ) ) continue;
+
+          char entry_path[ PATH_MAX ];
+          FD_TEST( fd_cstr_printf_check( entry_path, PATH_MAX, NULL, "%s/%s", mount_path[ i ], entry->d_name ) );
+          FD_LOG_NOTICE(( "RUN: `rm %s`", entry_path ));
+          if( FD_UNLIKELY( unlink( entry_path ) && errno!=ENOENT ) )
+            FD_LOG_ERR(( "error removing `%s` (%i-%s)", entry_path, errno, fd_io_strerror( errno ) ));
+        }
+        if( FD_UNLIKELY( errno ) ) FD_LOG_ERR(( "error reading dir `%s` (%i-%s)", mount_path[ i ], errno, fd_io_strerror( errno ) ));
+        if( FD_UNLIKELY( closedir( dir ) ) ) FD_LOG_ERR(( "error closing dir `%s` (%i-%s)", mount_path[ i ], errno, fd_io_strerror( errno ) ));
+      } else if( FD_UNLIKELY( errno!=ENOENT ) ) {
+        FD_LOG_ERR(( "error opening `%s` (%i-%s)", mount_path[ i ], errno, fd_io_strerror( errno ) ));
+      }
+    }
 
     FD_LOG_NOTICE(( "RUN: `rmdir %s`", mount_path[ i ] ));
     if( FD_UNLIKELY( rmdir( mount_path[ i ] ) && errno!=ENOENT ) )
@@ -443,6 +486,18 @@ check( config_t const * config,
 
     if( FD_UNLIKELY( !found ) )
       PARTIALLY_CONFIGURED( "mount `%s` not found in `/proc/self/mounts`", mount_path[ i ] );
+  }
+
+  /* When any workspace is backed by normal (4 KiB) pages, the regular
+     (non-hugetlbfs) directory that backs those files must exist too. */
+  if( FD_UNLIKELY( config->hugetlbfs.swap_large_workspaces_to_disk ||
+                   !strcmp( config->hugetlbfs.max_page_size, "normal" ) ) ) {
+    int result3 = stat( config->hugetlbfs.normal_page_mount_path, &st );
+    if( FD_UNLIKELY( result3 && errno!=ENOENT ) )
+      PARTIALLY_CONFIGURED( "failed to stat `%s` (%i-%s)", config->hugetlbfs.normal_page_mount_path, errno, fd_io_strerror( errno ) );
+    if( FD_UNLIKELY( result3 ) )
+      PARTIALLY_CONFIGURED( "directory `%s` does not exist", config->hugetlbfs.normal_page_mount_path );
+    CHECK( check_dir( config->hugetlbfs.normal_page_mount_path, config->uid, config->gid, S_IFDIR | S_IRUSR | S_IWUSR | S_IXUSR ) );
   }
 
   CONFIGURE_OK();

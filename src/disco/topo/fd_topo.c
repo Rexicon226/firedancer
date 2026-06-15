@@ -29,8 +29,22 @@ fd_topo_join_workspace( fd_topo_t *      topo,
   char name[ PATH_MAX ];
   FD_TEST( fd_cstr_printf_check( name, PATH_MAX, NULL, "%s_%s.wksp", topo->app_name, wksp->name ) );
 
-  wksp->wksp = fd_wksp_join( fd_shmem_join( name, mode, dump, NULL, NULL, NULL ) );
+  void * shmem = fd_shmem_join( name, mode, dump, NULL, NULL, NULL ); /* logs details */
+  wksp->wksp = fd_wksp_join( shmem );
   if( FD_UNLIKELY( !wksp->wksp ) ) FD_LOG_ERR(( "fd_wksp_join failed" ));
+
+  /* fd_shmem_join does not mlock normal (4 KiB) page regions, since those
+     are used for swappable workspaces that must remain pageable.  A
+     non-swappable workspace backed by normal pages (which happens when
+     [hugetlbfs.max_page_size] is "normal", e.g. on hosts that cannot
+     reserve huge pages) must still be locked resident, so we mlock it here.
+     Huge/gigantic regions are already mlocked by fd_shmem_join, and
+     swappable regions are intentionally left unlocked. */
+  if( FD_UNLIKELY( !wksp->is_swappable && wksp->page_sz==FD_SHMEM_NORMAL_PAGE_SZ ) ) {
+    ulong sz = wksp->page_cnt*wksp->page_sz;
+    if( FD_UNLIKELY( fd_numa_mlock( shmem, sz ) ) )
+      FD_LOG_WARNING(( "fd_numa_mlock(\"%s\",%lu KiB) failed (%i-%s); attempting to continue", name, sz>>10, errno, fd_io_strerror( errno ) ));
+  }
 }
 
 FD_FN_PURE static int
@@ -341,6 +355,9 @@ FD_FN_PURE ulong
 fd_topo_mlock( fd_topo_t const * topo ) {
   ulong result = 0UL;
   for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
+    /* Swappable workspaces are backed by normal pages on disk and are not
+       mlocked, so they do not count against the resident/locked memory. */
+    if( FD_UNLIKELY( topo->workspaces[ i ].is_swappable ) ) continue;
     result += topo->workspaces[ i ].page_cnt * topo->workspaces[ i ].page_sz;
   }
   return result;
@@ -396,6 +413,20 @@ fd_topo_print_log( int         stdout,
     (total_bytes % (1 << 30)) / (1 << 20),
     (total_bytes % (1 << 20)) / (1 << 10) );
 
+  ulong swappable_bytes = 0UL;
+  for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
+    if( FD_UNLIKELY( topo->workspaces[ i ].is_swappable ) )
+      swappable_bytes += topo->workspaces[ i ].page_cnt * topo->workspaces[ i ].page_sz;
+  }
+  if( FD_UNLIKELY( swappable_bytes ) ) {
+    PRINT("  %23s: %lu bytes (%lu GiB + %lu MiB + %lu KiB)\n",
+      "Swappable (disk-backed)",
+      swappable_bytes,
+      swappable_bytes / (1 << 30),
+      (swappable_bytes % (1 << 30)) / (1 << 20),
+      (swappable_bytes % (1 << 20)) / (1 << 10) );
+  }
+
   ulong required_gigantic_pages = 0UL;
   ulong required_huge_pages = 0UL;
 
@@ -430,7 +461,7 @@ fd_topo_print_log( int         stdout,
 
     char size[ 24 ];
     fd_topo_mem_sz_string( wksp->page_sz * wksp->page_cnt, size );
-    PRINT( "  %2lu (%7s): %12s  page_cnt=%3lu  page_sz=%-8s  numa_idx=%-2lu  footprint=%10lu  loose=%10lu\n", i, size, wksp->name, wksp->page_cnt, fd_shmem_page_sz_to_cstr( wksp->page_sz ), wksp->numa_idx, wksp->known_footprint, wksp->total_footprint - wksp->known_footprint );
+    PRINT( "  %2lu (%7s): %12s  page_cnt=%3lu  page_sz=%-8s  numa_idx=%-2lu  footprint=%10lu  loose=%10lu  %s\n", i, size, wksp->name, wksp->page_cnt, fd_shmem_page_sz_to_cstr( wksp->page_sz ), wksp->numa_idx, wksp->known_footprint, wksp->total_footprint - wksp->known_footprint, wksp->is_swappable ? "swap" : "" );
   }
 
   PRINT( "\nOBJECTS\n" );

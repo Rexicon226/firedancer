@@ -238,9 +238,16 @@ fd_shmem_join( char const *               name,
      destroying the system with core files if a bunch of thread using
      this mapping seg fault concurrently. */
 
-  if( FD_UNLIKELY( fd_numa_mlock( shmem, sz ) ) )
-    FD_LOG_WARNING(( "fd_numa_mlock(\"%s\",%lu KiB) failed (%i-%s); attempting to continue",
-                    path, sz>>10, errno, fd_io_strerror( errno ) ));
+  /* Normal (4 KiB) page regions are backed by a regular on-disk file and
+     are intended to be swappable; do not mlock them, otherwise they could
+     never be paged out to disk under memory pressure.  Huge/gigantic page
+     regions are always mlocked as they cannot be swapped regardless. */
+
+  if( FD_LIKELY( page_sz!=FD_SHMEM_NORMAL_PAGE_SZ ) ) {
+    if( FD_UNLIKELY( fd_numa_mlock( shmem, sz ) ) )
+      FD_LOG_WARNING(( "fd_numa_mlock(\"%s\",%lu KiB) failed (%i-%s); attempting to continue",
+                      path, sz>>10, errno, fd_io_strerror( errno ) ));
+  }
 
   if( FD_LIKELY( !dump ) ) {
     if( FD_UNLIKELY( madvise( shmem, sz, MADV_DONTDUMP ) ) )

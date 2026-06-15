@@ -2,6 +2,7 @@
 #define HEADER_fd_src_discof_ipecho_fd_ipecho_client_private_h
 
 #include "../../util/fd_util_base.h"
+#include "../../util/net/fd_net_headers.h"
 
 #include <poll.h>
 
@@ -22,6 +23,13 @@ struct fd_ipecho_client_private {
 
   struct pollfd pollfds[ 16UL ];
   fd_ipecho_client_peer_t peers[ 16UL ];
+
+  /* The entrypoint list is retained so that connections can be
+     re-established if they are closed before a response is received
+     (e.g. an entrypoint drops an idle connection during a slow boot,
+     before the run loop sends the request). */
+  fd_ip4_port_t servers[ 16UL ];
+  ulong         servers_len;
 
   ulong magic;
 };

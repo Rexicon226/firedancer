@@ -274,10 +274,17 @@ fd_shmem_create_multi_flags( char const *  name,
     ERROR( unmap );
   }
 
-  /* For each subregion */
+  /* For each subregion.
+
+     Normal (4 KiB) page regions are backed by a regular on-disk file and
+     are intended to be swappable, so we deliberately skip the NUMA
+     binding, mlock, and residency validation below.  Forcing residency
+     (mlock) or asserting page placement (move_pages) would defeat the
+     purpose of letting the kernel page these regions out to disk under
+     memory pressure. */
 
   uchar * sub_shmem = (uchar *)shmem;
-  for( ulong sub_idx=0UL; sub_idx<sub_cnt; sub_idx++ ) {
+  for( ulong sub_idx=0UL; page_sz!=FD_SHMEM_NORMAL_PAGE_SZ && sub_idx<sub_cnt; sub_idx++ ) {
     ulong sub_page_cnt = _sub_page_cnt[ sub_idx ];
     if( FD_UNLIKELY( !sub_page_cnt ) ) continue; /* Skip over empty sub-regions */
 

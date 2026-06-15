@@ -294,9 +294,18 @@ fd_config_fill( fd_config_t * config,
     NULL,
     "%s/.huge",
     config->hugetlbfs.mount_path ) );
+  /* Swappable workspaces live in a regular (non-hugetlbfs) directory under
+     the mount path so that the kernel page cache can spill them to disk.
+     For this to actually offload to disk, [hugetlbfs.mount_path] should be
+     on a disk-backed filesystem with sufficient capacity. */
+  FD_TEST( fd_cstr_printf_check( config->hugetlbfs.normal_page_mount_path,
+    sizeof(config->hugetlbfs.normal_page_mount_path),
+    NULL,
+    "%s/.normal",
+    config->hugetlbfs.mount_path ) );
 
   ulong max_page_sz = fd_cstr_to_shmem_page_sz( config->hugetlbfs.max_page_size );
-  if( FD_UNLIKELY( max_page_sz!=FD_SHMEM_HUGE_PAGE_SZ && max_page_sz!=FD_SHMEM_GIGANTIC_PAGE_SZ ) ) FD_LOG_ERR(( "[hugetlbfs.max_page_size] must be \"huge\" or \"gigantic\"" ));
+  if( FD_UNLIKELY( max_page_sz!=FD_SHMEM_NORMAL_PAGE_SZ && max_page_sz!=FD_SHMEM_HUGE_PAGE_SZ && max_page_sz!=FD_SHMEM_GIGANTIC_PAGE_SZ ) ) FD_LOG_ERR(( "[hugetlbfs.max_page_size] must be \"normal\", \"huge\" or \"gigantic\"" ));
 
   replace( config->log.path, "{user}", config->user );
   replace( config->log.path, "{name}", config->name );

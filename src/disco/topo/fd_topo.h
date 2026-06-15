@@ -49,6 +49,8 @@ typedef struct {
   ulong min_part_max; /* Artificially raise part_max */
   ulong min_loose_sz; /* Artificially raise loose footprint */
 
+  int   is_swappable; /* If non-zero, this workspace is allowed to spill to disk under memory pressure.  It is backed by normal (4 KiB) pages in a regular file (rather than mlocked huge/gigantic pages) so that the kernel page cache can write cold pages out to disk and reclaim the DRAM.  Used to support hosts with high disk capacity but low RAM. */
+
   /* Computed fields.  These are not supplied as configuration but calculated as needed. */
   struct {
     ulong page_sz;  /* The size of the pages that this workspace is backed by.  One of FD_PAGE_SIZE_*. */
@@ -239,7 +241,11 @@ struct fd_topo_tile {
 
       long boot_timestamp_nanos;
 
-      uint   ip_addr;
+      uint   ip_addr;      /* advertised (contact info) IP; may be a public/NAT
+                              address from [gossip] host */
+      uint   bind_ip_addr; /* local interface IP to source outbound packets
+                              from; must be routable on this host, otherwise
+                              the kernel returns ENETUNREACH on send */
       ushort shred_version;
 
       ulong  max_entries;
@@ -716,6 +722,11 @@ struct fd_topo {
 
   ulong          max_page_size; /* 2^21 or 2^30 */
   ulong          gigantic_page_threshold; /* see [hugetlbfs.gigantic_page_threshold_mib]*/
+
+  int            swap_large_wksps; /* If non-zero, large data workspaces are backed by swappable normal pages on disk rather than mlocked huge/gigantic pages.  See [hugetlbfs.swap_large_workspaces_to_disk] and fd_topo_wksp_t.is_swappable. */
+  ulong          swap_resident_budget; /* When swap_large_wksps is set, the target maximum resident (mlocked) workspace footprint in bytes.  The largest non-link workspaces are spilled to disk until the resident set fits within this budget.  Zero means spill every eligible workspace.  See [hugetlbfs.swap_resident_budget_mib]. */
+
+  int            cooperative_idle; /* If non-zero, the deployment is oversubscribed (more tiles than usable CPU cores), so tile run loops should cooperatively relinquish the CPU when idle instead of busy-spinning, letting the scheduler run a tile that has work.  Auto-detected at topology build time.  Has no effect on tiles that always find work (e.g. one tile per core in production). */
 };
 typedef struct fd_topo fd_topo_t;
 

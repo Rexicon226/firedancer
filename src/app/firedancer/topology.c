@@ -410,6 +410,8 @@ fd_topo_initialize( config_t * config ) {
 
   topo->max_page_size = fd_cstr_to_shmem_page_sz( config->hugetlbfs.max_page_size );
   topo->gigantic_page_threshold = config->hugetlbfs.gigantic_page_threshold_mib << 20;
+  topo->swap_large_wksps = config->hugetlbfs.swap_large_workspaces_to_disk;
+  topo->swap_resident_budget = config->hugetlbfs.swap_resident_budget_mib << 20;
 
   int solcap_enabled = strlen( config->capture.solcap_capture ) > 0;
 
@@ -1226,6 +1228,16 @@ fd_topo_initialize( config_t * config ) {
   }
 
   FOR(net_tile_cnt) fd_topos_net_tile_finish( topo, i );
+
+  /* Auto-detect CPU oversubscription.  When the topology has more tiles
+     than the host has usable cores, the tiles cannot each own a
+     dedicated core and busy-spin without starving one another, so we
+     ask the tile run loops to cooperatively yield the CPU when idle.
+     This is the common case on low-core / low-end hardware.  In the
+     normal one-tile-per-core production layout tile_cnt<=cpu_cnt and
+     this stays disabled, preserving pure busy-spin latency. */
+  topo->cooperative_idle = topo->tile_cnt > cpus->cpu_cnt;
+
   fd_topob_finish( topo, CALLBACKS );
   config->topo = *topo;
 }
@@ -1317,6 +1329,11 @@ fd_topo_configure_tile( fd_topo_tile_t * tile,
     } else {
       tile->gossip.ip_addr = config->net.ip_addr;
     }
+    /* Outbound packets must be sourced from the local interface address,
+       not the advertised host.  When [gossip] host is a public/NAT address
+       that is not configured on any local interface, sourcing from it makes
+       the kernel return ENETUNREACH for every send. */
+    tile->gossip.bind_ip_addr = config->net.ip_addr;
     fd_cstr_ncpy( tile->gossip.identity_key_path, config->paths.identity_key, sizeof(tile->gossip.identity_key_path) );
     tile->gossip.shred_version       = config->consensus.expected_shred_version;
     tile->gossip.max_entries         = config->tiles.gossip.max_entries;
@@ -1517,7 +1534,7 @@ fd_topo_configure_tile( fd_topo_tile_t * tile,
 
     tile->accdb.rpc_epoch_obj_id = fd_pod_query_ulong( config->topo.props, "accdb_epoch.rpc", ULONG_MAX );
 
-    tile->accdb.resolv_epoch_obj_cnt = config->firedancer.layout.resolv_tile_count;
+    tile->accdb.resolv_epoch_obj_cnt = config->firedancer.layout.enable_block_production ? config->firedancer.layout.resolv_tile_count : 0UL;
     FD_TEST( tile->accdb.resolv_epoch_obj_cnt<=sizeof(tile->accdb.resolv_epoch_obj_ids)/sizeof(tile->accdb.resolv_epoch_obj_ids[0]) );
     for( ulong i=0UL; i<tile->accdb.resolv_epoch_obj_cnt; i++ ) {
       tile->accdb.resolv_epoch_obj_ids[ i ] = fd_pod_queryf_ulong( config->topo.props, ULONG_MAX, "accdb_epoch.resolv.%lu", i );

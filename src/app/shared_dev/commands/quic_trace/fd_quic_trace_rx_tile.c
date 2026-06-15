@@ -558,6 +558,7 @@ fd_quic_trace_rx_tile( fd_quic_trace_ctx_t  * trace_ctx,
              /* stem_lazy  */ 0L,
              /* rng        */ rng,
              /* scratch    */ scratch,
+             /* coop_idle  */ 0,
              /* ctx        */ trace_ctx );
 
   for( int j = 0; j < 2; ++j ){

@@ -67,6 +67,13 @@ struct fd_sock_tile {
   uint tx_idle_cnt;
   uint bind_address;
 
+  /* Wall-clock deadline (ns) by which RX must be polled regardless of TX
+     activity.  The tx_idle_cnt debounce alone ties RX polling to TX
+     going idle for 512 iterations, which under sustained TX or the
+     cooperative idle backoff can starve RX for a long time.  This
+     deadline guarantees a bounded RX polling interval. */
+  long rx_next_ns;
+
   /* RX/TX batches
      FIXME transpose arrays for better cache locality? */
   ulong                batch_cnt; /* <=STEM_BURST */
@@ -79,6 +86,10 @@ struct fd_sock_tile {
   ushort            rx_sock_port[ FD_SOCK_TILE_MAX_SOCKETS ];
   uchar             link_rx_map [ FD_SOCK_TILE_MAX_SOCKETS ];
   uchar             repair_rx;
+  /* Socket index of the Firedancer repair intake socket, used to route
+     repair ping packets to the repair tile instead of the shred tile.
+     Set to UINT_MAX if there is no repair intake socket. */
+  uint              repair_shred_sock_idx;
   fd_sock_link_rx_t link_rx[ MAX_NET_OUTS ];
 
   /* TX links */
