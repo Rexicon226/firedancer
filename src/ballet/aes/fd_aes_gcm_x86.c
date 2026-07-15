@@ -120,7 +120,7 @@ fd_aes_gcm_init_aesni( fd_aes_gcm_aesni_t * aes_gcm,
   if( FD_LIKELY( key_sz == 16UL ) ) {
     expand_aes_key( &aes_gcm->key, key );
   } else {
-    /* For AES-{192,256}, we use the generic key expansion from 
+    /* For AES-{192,256}, we use the generic key expansion from
        fd_aes_base. */
     fd_aes_key_ref_t ref_key;
     fd_aes_set_encrypt_key( key, key_sz<<3UL, &ref_key );

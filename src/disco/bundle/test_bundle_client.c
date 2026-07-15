@@ -513,7 +513,6 @@ FD_UNIT_TEST( bundle_client_reset ) {
   FD_TEST( state->rtt->is_rtt_valid==0 );
   FD_TEST( state->auther.state==FD_BUNDLE_AUTH_STATE_DONE_WAIT );
   FD_TEST( state->auther.needs_poll==0 );
-  FD_TEST( state->grpc_client->ssl_hs_done==0 );
   FD_TEST( state->grpc_client->h2_hs_done==1 );
   FD_TEST( state->grpc_client->stream_cnt==2 );
 
@@ -531,7 +530,6 @@ FD_UNIT_TEST( bundle_client_reset ) {
   FD_TEST( state->rtt->is_rtt_valid==0 );
   FD_TEST( state->auther.state==FD_BUNDLE_AUTH_STATE_REQ_CHALLENGE );
   FD_TEST( state->auther.needs_poll==1 );
-  FD_TEST( state->grpc_client->ssl_hs_done==0 );
   FD_TEST( state->grpc_client->h2_hs_done==0 );
   FD_TEST( state->grpc_client->stream_cnt==0 );
 
@@ -1511,7 +1509,7 @@ main( int     argc,
   if( cpu_idx>fd_shmem_cpu_cnt() ) cpu_idx = 0UL;
 
   char const * _page_sz = fd_env_strip_cmdline_cstr ( &argc, &argv, "--page-sz",     NULL, "normal"                     );
-  ulong        page_cnt = fd_env_strip_cmdline_ulong( &argc, &argv, "--page-cnt",    NULL, 256UL                        );
+  ulong        page_cnt = fd_env_strip_cmdline_ulong( &argc, &argv, "--page-cnt",    NULL, 512UL                        );
   ulong        numa_idx = fd_env_strip_cmdline_ulong( &argc, &argv, "--numa-idx",    NULL, fd_shmem_numa_idx( cpu_idx ) );
 
   wksp = fd_wksp_new_anonymous( fd_cstr_to_shmem_page_sz( _page_sz ), page_cnt, fd_shmem_cpu_idx( numa_idx ), "wksp", 16UL );

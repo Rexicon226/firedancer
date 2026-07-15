@@ -798,16 +798,17 @@ fd_tls_server_hs_start( fd_tls_t const *      const server,
 
   /* Send Finished message */
 
+  ulong const fin_rec_sz = sizeof(fd_tls_msg_hdr_t) + 32UL;
   if( FD_UNLIKELY( !server->sendmsg_fn(
         handshake,
-        &fin_rec, sizeof(fin_rec),
+        &fin_rec, fin_rec_sz,
         FD_TLS_LEVEL_HANDSHAKE,
         /* flush */ 1 ) ) )
     return fd_tls_alert( &handshake->base, FD_TLS_ALERT_INTERNAL_ERROR, FD_TLS_REASON_SENDMSG_FAIL );
 
   /* Record Finished in transcript hash */
 
-  fd_sha256_append( &transcript, &fin_rec, sizeof(fin_rec) );
+  fd_sha256_append( &transcript, &fin_rec, fin_rec_sz );
 
   /* Derive application secrets ***************************************/
 
@@ -1385,6 +1386,10 @@ fd_tls_client_hs_wait_sh( fd_tls_t const *      const client,
 
     read_sz = (ulong)(wire - record);
   } while(0);
+
+  /* The server must select a cipher suite offered in ClientHello. */
+  if( FD_UNLIKELY( sh->cipher_suite!=FD_TLS_CIPHER_SUITE_AES_128_GCM_SHA256 ) )
+    return fd_tls_alert( &handshake->base, FD_TLS_ALERT_ILLEGAL_PARAMETER, FD_TLS_REASON_SH_PARSE );
 
   fd_tls_cs_t const * cs = fd_tls_cs_lookup( sh->cipher_suite );
   if( FD_UNLIKELY( !cs ) )
